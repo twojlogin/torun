@@ -1,6 +1,7 @@
 
 import MatrixRain from "@/components/MatrixRain";
 import Header from "@/components/Header";
+import Terminal from "@/components/Terminal";
 import { Card } from "@/components/ui/card";
 
 const Index = () => {
@@ -15,7 +16,9 @@ const Index = () => {
             Welcome to The Matrix
           </h1>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-6xl">
+          <Terminal />
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-6xl mt-8">
             <Card className="bg-card/30 backdrop-blur-sm border-primary/20 p-6 hover:border-primary/50 transition-colors">
               <h3 className="text-xl font-bold mb-4 matrix-glow">System Status</h3>
               <p className="text-muted-foreground">All systems operational</p>
