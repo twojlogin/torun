@@ -65,6 +65,8 @@ const SecureTunnel = () => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logs]);
 
+  const isReal = selected.network === 'IRC';
+
   const connect = async () => {
     if (status !== 'idle') return;
     setLogs([]);
@@ -80,28 +82,95 @@ const SecureTunnel = () => {
 
     for (let i = 0; i < HOPS.length; i++) {
       push(`> hop ${i + 1}/${HOPS.length}  →  ${HOPS[i]}`, 'info');
-      await wait(250 + Math.random() * 300);
-      push(`  handshake ok  (${(20 + Math.random() * 80).toFixed(0)} ms)`, 'ok');
+      await wait(isReal ? 60 : 250 + Math.random() * 300);
+      if (!isReal) push(`  handshake ok  (${(20 + Math.random() * 80).toFixed(0)} ms)`, 'ok');
       setEncStrength(Math.round(((i + 1) / HOPS.length) * 100));
+    }
+
+    if (isReal) {
+      connectReal();
+      return;
     }
 
     push('> negotiating cipher: CHACHA20-POLY1305@openssh.com', 'info');
     await wait(300);
-    push('  MAC: hmac-sha2-512-etm', 'ok');
-    await wait(200);
-    push(`> tunnel established — latency ${selected.ping} ms`, 'ok');
-    await wait(200);
     push(`> joining ${selected.network} as ${nick}`, 'info');
     await wait(300);
     push(`*** connected to ${selected.name}`, 'ok');
     setStatus('connected');
   };
 
+  const connectReal = () => {
+    push(`> opening gateway link (wss) for REAL irc session...`, 'info');
+    const wsUrl = `${import.meta.env.VITE_SUPABASE_URL.replace(/^http/, 'ws')}/functions/v1/irc-tunnel`;
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+    realRef.current = true;
+
+    ws.onopen = () => {
+      push('> gateway link up — dialing irc server', 'ok');
+      ws.send(JSON.stringify({ type: 'init', host: selected.host, port: selected.port, nick }));
+    };
+
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(String(ev.data));
+        if (msg.type === 'status') {
+          if (msg.status === 'error') {
+            push(`*** gateway error: ${msg.detail}`, 'err');
+            setStatus('idle');
+            setEncStrength(0);
+            return;
+          }
+          push(`> ${msg.status}: ${msg.detail ?? ''}`, 'ok');
+          if (msg.status === 'linked') {
+            push(`*** REAL connection live on ${selected.name} as ${nick}`, 'ok');
+            push('// type irc commands below, e.g. JOIN #matrix  or  PRIVMSG #matrix :hello', 'info');
+            setStatus('connected');
+          }
+        } else if (msg.type === 'irc') {
+          push(msg.line, 'msg');
+        }
+      } catch { /* malformed frame */ }
+    };
+
+    ws.onerror = () => {
+      push('*** gateway unreachable — is the tunnel function deployed?', 'err');
+      setStatus('idle');
+      setEncStrength(0);
+    };
+
+    ws.onclose = () => {
+      wsRef.current = null;
+      realRef.current = false;
+      setStatus((s) => {
+        if (s !== 'idle') {
+          push('*** link closed by remote host', 'warn');
+          setEncStrength(0);
+        }
+        return 'idle';
+      });
+    };
+  };
+
   const disconnect = () => {
+    if (realRef.current && wsRef.current) {
+      try { wsRef.current.send(JSON.stringify({ type: 'raw', line: 'QUIT :back to the desert of the real' })); } catch { /* noop */ }
+      wsRef.current.close();
+      wsRef.current = null;
+      realRef.current = false;
+    }
     push('> tearing down tunnel...', 'warn');
     push('*** disconnected — you are back in the desert of the real', 'warn');
     setStatus('idle');
     setEncStrength(0);
+  };
+
+  const sendRaw = (line: string) => {
+    if (wsRef.current && realRef.current) {
+      wsRef.current.send(JSON.stringify({ type: 'raw', line }));
+      push(`<< ${line}`, 'info');
+    }
   };
 
   // simulated chatter while connected
