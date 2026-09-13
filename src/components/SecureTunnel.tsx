@@ -173,14 +173,29 @@ const SecureTunnel = () => {
     }
   };
 
-  // simulated chatter while connected
+  // simulated chatter while connected (hidden networks only — real IRC speaks for itself)
   useEffect(() => {
-    if (status !== 'connected') return;
+    if (status !== 'connected' || realRef.current) return;
     const t = setInterval(() => {
       push(CHATTER[Math.floor(Math.random() * CHATTER.length)], 'msg');
     }, 2500 + Math.random() * 3000);
     return () => clearInterval(t);
   }, [status]);
+
+  const [input, setInput] = useState('');
+
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const line = input.trim();
+    if (!line) return;
+    setInput('');
+    if (realRef.current) {
+      sendRaw(line);
+    } else {
+      push(`<< ${line}`, 'info');
+      push('// input relay is live only on real IRC uplinks (green-hops list)', 'warn');
+    }
+  };
 
   return (
     <Card className="w-full max-w-4xl mx-auto bg-black/80 backdrop-blur-sm border-primary/30 p-0 overflow-hidden">
@@ -273,7 +288,15 @@ const SecureTunnel = () => {
             </div>
           ))}
           {status === 'connected' && (
-            <div className="text-primary animate-pulse">_</div>
+            <form onSubmit={onSubmit} className="flex items-center gap-1 mt-1">
+              <span className="text-primary">»</span>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={isReal ? 'JOIN #matrix' : 'simulated link — no uplink'}
+                className="flex-1 bg-transparent outline-none text-primary placeholder:text-muted-foreground/50"
+              />
+            </form>
           )}
         </div>
       </div>
