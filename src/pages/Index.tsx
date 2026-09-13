@@ -21,6 +21,13 @@ const Index = () => {
           </h1>
           
           <Terminal />
+
+          <div className="w-full">
+            <h2 className="text-2xl md:text-3xl font-bold text-center matrix-glow mb-4">
+              <GlitchText text="Secure Tunnel" />
+            </h2>
+            <SecureTunnel />
+          </div>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 w-full max-w-6xl mt-8">
             <Card className="bg-card/30 backdrop-blur-sm border-primary/20 p-6 hover:border-primary/50 transition-colors">
