@@ -7,6 +7,7 @@
 
 const ALLOWED_HOSTS: Record<string, number[]> = {
   "irc.libera.chat": [6697, 6667],
+  "irc.dal.net": [6667, 6697],
   "irc.oftc.net": [6697, 6667],
   "irc.efnet.org": [6667],
   "irc.undernet.org": [6667],
