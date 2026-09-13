@@ -17,7 +17,6 @@ interface Server {
 }
 
 const SERVERS: Server[] = [
-  { id: 'libera', name: 'Libera.Chat', host: 'irc.libera.chat', port: 6697, network: 'IRC', ping: 42 },
   { id: 'oftc', name: 'OFTC', host: 'irc.oftc.net', port: 6697, network: 'IRC', ping: 58 },
   { id: 'efnet', name: 'EFnet', host: 'irc.efnet.org', port: 6667, network: 'IRC', ping: 73 },
   { id: 'undernet', name: 'Undernet', host: 'irc.undernet.org', port: 6667, network: 'IRC', ping: 91 },
@@ -54,6 +53,8 @@ const SecureTunnel = () => {
   const [encStrength, setEncStrength] = useState(0);
   const [nick] = useState(() => `neo_${Math.floor(Math.random() * 9999)}`);
   const logRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const realRef = useRef(false);
 
   const push = (text: string, type: TunnelLog['type'] = 'info') => {
     setLogs((p) => [...p.slice(-80), { text, type }]);
@@ -62,6 +63,8 @@ const SecureTunnel = () => {
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logs]);
+
+  const isReal = selected.network === 'IRC';
 
   const connect = async () => {
     if (status !== 'idle') return;
@@ -78,38 +81,120 @@ const SecureTunnel = () => {
 
     for (let i = 0; i < HOPS.length; i++) {
       push(`> hop ${i + 1}/${HOPS.length}  →  ${HOPS[i]}`, 'info');
-      await wait(250 + Math.random() * 300);
-      push(`  handshake ok  (${(20 + Math.random() * 80).toFixed(0)} ms)`, 'ok');
+      await wait(isReal ? 60 : 250 + Math.random() * 300);
+      if (!isReal) push(`  handshake ok  (${(20 + Math.random() * 80).toFixed(0)} ms)`, 'ok');
       setEncStrength(Math.round(((i + 1) / HOPS.length) * 100));
+    }
+
+    if (isReal) {
+      connectReal();
+      return;
     }
 
     push('> negotiating cipher: CHACHA20-POLY1305@openssh.com', 'info');
     await wait(300);
-    push('  MAC: hmac-sha2-512-etm', 'ok');
-    await wait(200);
-    push(`> tunnel established — latency ${selected.ping} ms`, 'ok');
-    await wait(200);
     push(`> joining ${selected.network} as ${nick}`, 'info');
     await wait(300);
     push(`*** connected to ${selected.name}`, 'ok');
     setStatus('connected');
   };
 
+  const connectReal = () => {
+    push(`> opening gateway link (wss) for REAL irc session...`, 'info');
+    const wsUrl = `${import.meta.env.VITE_SUPABASE_URL.replace(/^http/, 'ws')}/functions/v1/irc-tunnel`;
+    const ws = new WebSocket(wsUrl);
+    wsRef.current = ws;
+    realRef.current = true;
+
+    ws.onopen = () => {
+      push('> gateway link up — dialing irc server', 'ok');
+      ws.send(JSON.stringify({ type: 'init', host: selected.host, port: selected.port, nick }));
+    };
+
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(String(ev.data));
+        if (msg.type === 'status') {
+          if (msg.status === 'error') {
+            push(`*** gateway error: ${msg.detail}`, 'err');
+            setStatus('idle');
+            setEncStrength(0);
+            return;
+          }
+          push(`> ${msg.status}: ${msg.detail ?? ''}`, 'ok');
+          if (msg.status === 'linked') {
+            push(`*** REAL connection live on ${selected.name} as ${nick}`, 'ok');
+            push('// type irc commands below, e.g. JOIN #matrix  or  PRIVMSG #matrix :hello', 'info');
+            setStatus('connected');
+          }
+        } else if (msg.type === 'irc') {
+          push(msg.line, 'msg');
+        }
+      } catch { /* malformed frame */ }
+    };
+
+    ws.onerror = () => {
+      push('*** gateway unreachable — is the tunnel function deployed?', 'err');
+      setStatus('idle');
+      setEncStrength(0);
+    };
+
+    ws.onclose = () => {
+      wsRef.current = null;
+      realRef.current = false;
+      setStatus((s) => {
+        if (s !== 'idle') {
+          push('*** link closed by remote host', 'warn');
+          setEncStrength(0);
+        }
+        return 'idle';
+      });
+    };
+  };
+
   const disconnect = () => {
+    if (realRef.current && wsRef.current) {
+      try { wsRef.current.send(JSON.stringify({ type: 'raw', line: 'QUIT :back to the desert of the real' })); } catch { /* noop */ }
+      wsRef.current.close();
+      wsRef.current = null;
+      realRef.current = false;
+    }
     push('> tearing down tunnel...', 'warn');
     push('*** disconnected — you are back in the desert of the real', 'warn');
     setStatus('idle');
     setEncStrength(0);
   };
 
-  // simulated chatter while connected
+  const sendRaw = (line: string) => {
+    if (wsRef.current && realRef.current) {
+      wsRef.current.send(JSON.stringify({ type: 'raw', line }));
+      push(`<< ${line}`, 'info');
+    }
+  };
+
+  // simulated chatter while connected (hidden networks only — real IRC speaks for itself)
   useEffect(() => {
-    if (status !== 'connected') return;
+    if (status !== 'connected' || realRef.current) return;
     const t = setInterval(() => {
       push(CHATTER[Math.floor(Math.random() * CHATTER.length)], 'msg');
     }, 2500 + Math.random() * 3000);
     return () => clearInterval(t);
   }, [status]);
+
+  const [input, setInput] = useState('');
+
+  const onSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const line = input.trim();
+    if (!line) return;
+    setInput('');
+    if (realRef.current) {
+      sendRaw(line);
+    } else {
+      push(`<< ${line}`, 'info');
+      push('// input relay is live only on real IRC uplinks (green-hops list)', 'warn');
+    }
+  };
 
   return (
     <Card className="w-full max-w-4xl mx-auto bg-black/80 backdrop-blur-sm border-primary/30 p-0 overflow-hidden">
@@ -202,7 +287,15 @@ const SecureTunnel = () => {
             </div>
           ))}
           {status === 'connected' && (
-            <div className="text-primary animate-pulse">_</div>
+            <form onSubmit={onSubmit} className="flex items-center gap-1 mt-1">
+              <span className="text-primary">»</span>
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                placeholder={isReal ? 'JOIN #matrix' : 'simulated link — no uplink'}
+                className="flex-1 bg-transparent outline-none text-primary placeholder:text-muted-foreground/50"
+              />
+            </form>
           )}
         </div>
       </div>
