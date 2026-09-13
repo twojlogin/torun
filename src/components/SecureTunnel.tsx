@@ -17,7 +17,7 @@ interface Server {
 }
 
 const SERVERS: Server[] = [
-  { id: 'libera', name: 'Libera.Chat', host: 'irc.libera.chat', port: 6697, network: 'IRC', ping: 42 },
+  { id: 'dalnet', name: 'DALnet', host: 'irc.dal.net', port: 6667, network: 'IRC', ping: 35 },
   { id: 'oftc', name: 'OFTC', host: 'irc.oftc.net', port: 6697, network: 'IRC', ping: 58 },
   { id: 'efnet', name: 'EFnet', host: 'irc.efnet.org', port: 6667, network: 'IRC', ping: 73 },
   { id: 'undernet', name: 'Undernet', host: 'irc.undernet.org', port: 6667, network: 'IRC', ping: 91 },
