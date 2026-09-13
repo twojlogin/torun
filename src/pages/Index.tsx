@@ -4,6 +4,7 @@ import Header from "@/components/Header";
 import Terminal from "@/components/Terminal";
 import GlitchText from "@/components/GlitchText";
 import MatrixGlitch from "@/components/MatrixGlitch";
+import SecureTunnel from "@/components/SecureTunnel";
 import { Card } from "@/components/ui/card";
 
 const Index = () => {
