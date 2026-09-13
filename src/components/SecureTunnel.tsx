@@ -54,6 +54,8 @@ const SecureTunnel = () => {
   const [encStrength, setEncStrength] = useState(0);
   const [nick] = useState(() => `neo_${Math.floor(Math.random() * 9999)}`);
   const logRef = useRef<HTMLDivElement>(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const realRef = useRef(false);
 
   const push = (text: string, type: TunnelLog['type'] = 'info') => {
     setLogs((p) => [...p.slice(-80), { text, type }]);
