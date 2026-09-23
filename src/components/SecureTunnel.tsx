@@ -103,8 +103,11 @@ const SecureTunnel = () => {
       return;
     }
     if (command === 'PRIVMSG') {
-      const action = trailing.match(/^\u0001ACTION (.*)\u0001$/);
-      push(action ? `* ${source} ${action[1]}` : trailing, 'msg', action ? undefined : source);
+      const actionMarker = String.fromCharCode(1);
+      const action = trailing.startsWith(`${actionMarker}ACTION `) && trailing.endsWith(actionMarker)
+        ? trailing.slice(8, -1)
+        : null;
+      push(action ? `* ${source} ${action}` : trailing, 'msg', action ? undefined : source);
       return;
     }
     if (/^\d{3}$/.test(command)) push(trailing || rest, command[0] === '4' ? 'err' : 'info');
