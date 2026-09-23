@@ -6,6 +6,7 @@
 //   server -> { type: "irc", line }          // raw line from the server
 
 const ALLOWED_HOSTS: Record<string, number[]> = {
+  "jowisz.pirc.pl": [6697, 6667],
   "irc.libera.chat": [6697, 6667],
   "irc.dal.net": [6667, 6697],
   "irc.oftc.net": [6697, 6667],
