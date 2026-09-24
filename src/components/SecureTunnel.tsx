@@ -1,19 +1,16 @@
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Eye, EyeOff, LogOut, Send, Users } from 'lucide-react';
+import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronLeft, ChevronRight, Hash, LogOut, Menu, MessageSquare, RefreshCw, Send, Users, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
-type TunnelLog = { text: string; type: 'info' | 'ok' | 'warn' | 'err' | 'msg'; nick?: string };
 type Theme = 'matrix' | 'mono' | 'pirc';
-type Status = 'idle' | 'connecting' | 'connected';
+type Status = 'idle' | 'connecting' | 'connected' | 'reconnecting';
+type LogType = 'info' | 'ok' | 'warn' | 'err' | 'msg' | 'notice' | 'action';
+type ChatLog = { id: number; text: string; type: LogType; nick?: string; time: string };
+type BufferKind = 'server' | 'channel' | 'query';
+type ChatBuffer = { id: string; label: string; kind: BufferKind; logs: ChatLog[]; nicks: string[]; topic: string; modes: string; unread: number; mention: boolean };
 
-interface Server {
-  id: string;
-  name: string;
-  host: string;
-  port: number;
-  network: 'IRC' | 'HIDDEN';
-  ping: number;
-}
+interface Server { id: string; name: string; host: string; port: number; network: 'IRC' | 'HIDDEN'; ping: number }
 
 const SERVERS: Server[] = [
   { id: 'pirc', name: 'PIRC · Jowisz', host: 'jowisz.pirc.pl', port: 6697, network: 'IRC', ping: 24 },
@@ -24,53 +21,85 @@ const SERVERS: Server[] = [
   { id: 'zion', name: 'Zion Mainframe', host: 'zion.matrix.sys', port: 1999, network: 'HIDDEN', ping: 7 },
   { id: 'nebuchadnezzar', name: 'Nebuchadnezzar', host: 'neb.hovercraft.zion', port: 2317, network: 'HIDDEN', ping: 12 },
 ];
-
-const HOPS = ['entry-node.tor.exit', 'relay-fra.de', 'relay-ams.nl', 'relay-tok.jp', 'relay-sao.br', 'exit-node.zion'];
-const CHATTER = ['<morpheus> the signal is clean', '<trinity> route confirmed', '<oracle> cookies are ready', '*** dozer has joined #zion', '<neo> whoa.', '<smith> Mr. Anderson...'];
 const THEMES: { id: Theme; label: string }[] = [{ id: 'matrix', label: 'MATRIX' }, { id: 'mono', label: 'MONO' }, { id: 'pirc', label: 'PIRC' }];
-
+const COMMANDS = ['/join', '/part', '/query', '/close', '/nick', '/me', '/msg', '/notice', '/whois', '/topic', '/mode', '/kick', '/ban', '/invite', '/away', '/names', '/list', '/raw', '/quote', '/help', '/quit'];
+const HOPS = ['entry-node.tor.exit', 'relay-fra.de', 'relay-ams.nl', 'relay-tok.jp', 'relay-sao.br', 'exit-node.zion'];
+const CHATTER = ['<morpheus> the signal is clean', '<trinity> route confirmed', '<oracle> cookies are ready', '*** dozer has joined #zion', '<neo> whoa.'];
+const serverBuffer = (): ChatBuffer => ({ id: 'server', label: 'Status', kind: 'server', logs: [], nicks: [], topic: '', modes: '', unread: 0, mention: false });
 const prefixNick = (prefix: string) => prefix.split('!')[0].replace(/^:/, '');
 const stripRank = (name: string) => name.replace(/^[@+%&~]/, '');
-const rank = (name: string) => name.startsWith('@') ? 0 : name.startsWith('+') ? 1 : 2;
+const rank = (name: string) => name.startsWith('~') ? 0 : name.startsWith('&') ? 1 : name.startsWith('@') ? 2 : name.startsWith('%') ? 3 : name.startsWith('+') ? 4 : 5;
+const normalizeId = (value: string) => value.toLocaleLowerCase();
+const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+let logId = 0;
 
 const SecureTunnel = () => {
   const [selected, setSelected] = useState<Server>(SERVERS[0]);
   const [status, setStatus] = useState<Status>('idle');
-  const [logs, setLogs] = useState<TunnelLog[]>([]);
+  const [buffers, setBuffers] = useState<ChatBuffer[]>([serverBuffer()]);
+  const [activeId, setActiveId] = useState('server');
   const [encStrength, setEncStrength] = useState(0);
   const [nick, setNick] = useState(() => `neo_${Math.floor(Math.random() * 9999)}`);
-  const [channel, setChannel] = useState('');
-  const [nicks, setNicks] = useState<string[]>([]);
   const [input, setInput] = useState('');
   const [showNicks, setShowNicks] = useState(true);
+  const [showChats, setShowChats] = useState(true);
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('matrix-theme') as Theme) || 'matrix');
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
   const logRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const realRef = useRef(false);
   const nickRef = useRef(nick);
+  const activeRef = useRef(activeId);
+  const intentionalCloseRef = useRef(false);
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reconnectCountRef = useRef(0);
 
   const isReal = selected.network === 'IRC';
-  const sortedNicks = useMemo(() => [...nicks].sort((a, b) => rank(a) - rank(b) || stripRank(a).localeCompare(stripRank(b))), [nicks]);
-  const push = (text: string, type: TunnelLog['type'] = 'info', messageNick?: string) => setLogs((previous) => [...previous.slice(-160), { text, type, nick: messageNick }]);
+  const active = buffers.find((item) => item.id === activeId) ?? buffers[0];
+  const sortedNicks = useMemo(() => [...(active?.nicks ?? [])].sort((a, b) => rank(a) - rank(b) || stripRank(a).localeCompare(stripRank(b))), [active?.nicks]);
 
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    localStorage.setItem('matrix-theme', theme);
-  }, [theme]);
-
+  useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('matrix-theme', theme); }, [theme]);
   useEffect(() => { nickRef.current = nick; }, [nick]);
-  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [logs]);
-  useEffect(() => () => wsRef.current?.close(), []);
+  useEffect(() => { activeRef.current = activeId; }, [activeId]);
+  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [active?.logs]);
+  useEffect(() => () => { intentionalCloseRef.current = true; wsRef.current?.close(); if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current); }, []);
+
+  const ensureBuffer = (label: string, kind: BufferKind) => {
+    const id = kind === 'server' ? 'server' : normalizeId(label);
+    setBuffers((previous) => previous.some((item) => item.id === id) ? previous : [...previous, { id, label, kind, logs: [], nicks: [], topic: '', modes: '', unread: 0, mention: false }]);
+    return id;
+  };
+
+  const push = (target: string, text: string, type: LogType = 'info', messageNick?: string) => {
+    const id = normalizeId(target || 'server');
+    const mention = type === 'msg' && text.toLocaleLowerCase().includes(nickRef.current.toLocaleLowerCase());
+    setBuffers((previous) => previous.map((buffer) => buffer.id === id ? {
+      ...buffer,
+      logs: [...buffer.logs.slice(-399), { id: ++logId, text, type, nick: messageNick, time: now() }],
+      unread: activeRef.current === id ? 0 : buffer.unread + 1,
+      mention: activeRef.current === id ? false : buffer.mention || mention,
+    } : buffer));
+  };
+
+  const openBuffer = (id: string) => {
+    setActiveId(id); activeRef.current = id;
+    setBuffers((previous) => previous.map((buffer) => buffer.id === id ? { ...buffer, unread: 0, mention: false } : buffer));
+    inputRef.current?.focus();
+  };
 
   const sendRaw = (line: string, echo = true) => {
-    if (!wsRef.current || !realRef.current) return;
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN || !realRef.current) return;
     wsRef.current.send(JSON.stringify({ type: 'raw', line }));
-    if (echo) push(`› ${line}`, 'info');
+    if (echo) push('server', `› ${line}`, 'info');
   };
+
+  const removeNick = (source: string) => setBuffers((previous) => previous.map((buffer) => ({ ...buffer, nicks: buffer.nicks.filter((entry) => stripRank(entry) !== source) })));
 
   const parseIrc = (line: string) => {
     const match = line.match(/^:([^ ]+) ([A-Z0-9]+) ?(.*)$/);
-    if (!match) { push(line, 'msg'); return; }
+    if (!match) { push('server', line, 'info'); return; }
     const [, prefix, command, rest] = match;
     const source = prefixNick(prefix);
     const trailingIndex = rest.indexOf(' :');
@@ -78,176 +107,198 @@ const SecureTunnel = () => {
     const trailing = trailingIndex >= 0 ? rest.slice(trailingIndex + 2) : '';
 
     if (command === '353') {
+      const target = params[2]; if (!target) return;
+      const id = ensureBuffer(target, 'channel');
       const names = trailing.split(' ').filter(Boolean);
-      setNicks((previous) => Array.from(new Set([...previous, ...names])));
+      setBuffers((previous) => previous.map((buffer) => buffer.id === id ? { ...buffer, nicks: Array.from(new Set([...buffer.nicks, ...names])) } : buffer));
       return;
     }
     if (command === '366') return;
+    if (command === '332' || command === '333') {
+      const target = params[1]; if (!target || command === '333') return;
+      const id = ensureBuffer(target, 'channel');
+      setBuffers((previous) => previous.map((buffer) => buffer.id === id ? { ...buffer, topic: trailing } : buffer));
+      return;
+    }
     if (command === 'JOIN') {
       const joined = (trailing || params[0] || '').replace(/^:/, '');
-      if (source === nickRef.current) { setChannel(joined); setNicks([]); sendRaw(`NAMES ${joined}`, false); }
-      setNicks((previous) => previous.some((entry) => stripRank(entry) === source) ? previous : [...previous, source]);
-      push(`→ ${source} dołącza do ${joined}`, 'ok');
+      const id = ensureBuffer(joined, 'channel');
+      if (source === nickRef.current) { openBuffer(id); sendRaw(`NAMES ${joined}`, false); sendRaw(`TOPIC ${joined}`, false); }
+      setBuffers((previous) => previous.map((buffer) => buffer.id === id && !buffer.nicks.some((entry) => stripRank(entry) === source) ? { ...buffer, nicks: [...buffer.nicks, source] } : buffer));
+      push(id, `${source} dołącza do ${joined}`, 'ok'); return;
+    }
+    if (command === 'PART') {
+      const target = params[0] || activeRef.current;
+      if (source === nickRef.current) { setBuffers((previous) => previous.filter((buffer) => buffer.id !== normalizeId(target))); openBuffer('server'); }
+      else { setBuffers((previous) => previous.map((buffer) => buffer.id === normalizeId(target) ? { ...buffer, nicks: buffer.nicks.filter((entry) => stripRank(entry) !== source) } : buffer)); push(target, `${source} opuszcza kanał${trailing ? ` · ${trailing}` : ''}`, 'warn'); }
       return;
     }
-    if (command === 'PART' || command === 'QUIT') {
-      setNicks((previous) => previous.filter((entry) => stripRank(entry) !== source));
-      push(`← ${source} opuszcza kanał${trailing ? ` · ${trailing}` : ''}`, 'warn');
-      return;
-    }
+    if (command === 'QUIT') { removeNick(source); buffers.filter((buffer) => buffer.nicks.some((entry) => stripRank(entry) === source)).forEach((buffer) => push(buffer.id, `${source} rozłącza się${trailing ? ` · ${trailing}` : ''}`, 'warn')); return; }
     if (command === 'NICK') {
       const nextNick = (trailing || params[0]).replace(/^:/, '');
-      setNicks((previous) => previous.map((entry) => stripRank(entry) === source ? `${entry.match(/^[@+%&~]/)?.[0] || ''}${nextNick}` : entry));
+      setBuffers((previous) => previous.map((buffer) => ({ ...buffer, nicks: buffer.nicks.map((entry) => stripRank(entry) === source ? `${entry.match(/^[@+%&~]/)?.[0] || ''}${nextNick}` : entry) })));
       if (source === nickRef.current) setNick(nextNick);
-      push(`◆ ${source} zmienia nick na ${nextNick}`, 'info');
+      buffers.filter((buffer) => buffer.nicks.some((entry) => stripRank(entry) === source)).forEach((buffer) => push(buffer.id, `${source} zmienia nick na ${nextNick}`, 'info'));
       return;
     }
-    if (command === 'PRIVMSG') {
-      const actionMarker = String.fromCharCode(1);
-      const action = trailing.startsWith(`${actionMarker}ACTION `) && trailing.endsWith(actionMarker)
-        ? trailing.slice(8, -1)
-        : null;
-      push(action ? `* ${source} ${action}` : trailing, 'msg', action ? undefined : source);
+    if (command === 'PRIVMSG' || command === 'NOTICE') {
+      const target = params[0] || 'server';
+      const isPrivate = normalizeId(target) === normalizeId(nickRef.current);
+      const bufferLabel = isPrivate ? source : target;
+      const id = ensureBuffer(bufferLabel, isPrivate ? 'query' : 'channel');
+      const marker = String.fromCharCode(1);
+      const action = trailing.startsWith(`${marker}ACTION `) && trailing.endsWith(marker) ? trailing.slice(8, -1) : null;
+      push(id, action ? `${source} ${action}` : trailing, command === 'NOTICE' ? 'notice' : action ? 'action' : 'msg', action ? undefined : source);
       return;
     }
-    if (/^\d{3}$/.test(command)) push(trailing || rest, command[0] === '4' ? 'err' : 'info');
+    if (command === 'TOPIC') {
+      const target = params[0]; if (!target) return;
+      const id = ensureBuffer(target, 'channel');
+      setBuffers((previous) => previous.map((buffer) => buffer.id === id ? { ...buffer, topic: trailing } : buffer));
+      push(id, `${source} zmienia temat: ${trailing}`, 'info'); return;
+    }
+    if (command === 'MODE') {
+      const target = params[0]; if (!target) return;
+      const id = target.startsWith('#') ? normalizeId(target) : 'server';
+      if (target.startsWith('#')) setBuffers((previous) => previous.map((buffer) => buffer.id === id ? { ...buffer, modes: params.slice(1).join(' ') } : buffer));
+      push(id, `${source} ustawia MODE ${params.slice(1).join(' ')}`, 'info'); return;
+    }
+    if (command === 'KICK') {
+      const [target, kicked] = params; if (!target || !kicked) return;
+      setBuffers((previous) => previous.map((buffer) => buffer.id === normalizeId(target) ? { ...buffer, nicks: buffer.nicks.filter((entry) => stripRank(entry) !== kicked) } : buffer));
+      push(target, `${source} wyrzuca ${kicked}${trailing ? ` · ${trailing}` : ''}`, 'warn'); return;
+    }
+    if (command === 'INVITE') { push('server', `${source} zaprasza Cię na ${trailing || params[1]}`, 'notice'); return; }
+    if (/^4\d\d$/.test(command) || command === 'ERROR') push('server', trailing || rest, 'err');
+    else if (/^\d{3}$/.test(command)) push('server', trailing || rest, 'info');
   };
 
   const connectReal = () => {
-    push('> otwieram bezpieczną bramkę WebSocket...', 'info');
+    intentionalCloseRef.current = false;
     const wsUrl = `${import.meta.env.VITE_SUPABASE_URL.replace(/^http/, 'ws')}/functions/v1/irc-tunnel`;
-    const ws = new WebSocket(wsUrl);
-    wsRef.current = ws;
-    realRef.current = true;
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'init', host: selected.host, port: selected.port, nick }));
-    ws.onmessage = (event) => {
-      try {
-        const message = JSON.parse(String(event.data));
-        if (message.type === 'status') {
-          if (message.status === 'error') { push(`*** ${message.detail}`, 'err'); setStatus('idle'); setEncStrength(0); return; }
-          push(`> ${message.status}: ${message.detail ?? ''}`, 'ok');
-          if (message.status === 'linked') { setStatus('connected'); push('Połączono. Wpisz /join #kanał, aby wejść na kanał.', 'ok'); }
-        } else if (message.type === 'irc') parseIrc(message.line);
-      } catch { push('*** nieczytelna odpowiedź bramki', 'err'); }
+    const ws = new WebSocket(wsUrl); wsRef.current = ws; realRef.current = true;
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'init', host: selected.host, port: selected.port, nick: nickRef.current }));
+    ws.onmessage = (event) => { try { const message = JSON.parse(String(event.data)); if (message.type === 'status') { if (message.status === 'error') { push('server', `*** ${message.detail}`, 'err'); return; } push('server', `> ${message.status}: ${message.detail ?? ''}`, 'ok'); if (message.status === 'linked') { reconnectCountRef.current = 0; setStatus('connected'); push('server', 'Połączono. Wpisz /join #kanał.', 'ok'); } } else if (message.type === 'irc') parseIrc(message.line); } catch { push('server', '*** nieczytelna odpowiedź bramki', 'err'); } };
+    ws.onerror = () => push('server', '*** bramka jest chwilowo niedostępna', 'err');
+    ws.onclose = () => {
+      wsRef.current = null; realRef.current = false; setEncStrength(0);
+      if (intentionalCloseRef.current) { setStatus('idle'); return; }
+      reconnectCountRef.current += 1; const delay = Math.min(30000, 2000 * 2 ** (reconnectCountRef.current - 1));
+      setStatus('reconnecting'); push('server', `Połączenie przerwane. Ponawiam za ${Math.round(delay / 1000)} s…`, 'warn');
+      reconnectTimerRef.current = setTimeout(connectReal, delay);
     };
-    ws.onerror = () => { push('*** bramka jest chwilowo niedostępna', 'err'); setStatus('idle'); setEncStrength(0); };
-    ws.onclose = () => { wsRef.current = null; realRef.current = false; setStatus('idle'); setChannel(''); setNicks([]); setEncStrength(0); };
   };
 
   const connect = async () => {
     if (status !== 'idle') return;
-    setLogs([]); setNicks([]); setChannel(''); setStatus('connecting'); setEncStrength(0);
-    push(`> tunel do ${selected.host}:${selected.port}`, 'info');
-    await wait(180);
-    push(`> klucz x25519: ${randHex(20)}`, 'ok');
-    for (let i = 0; i < HOPS.length; i += 1) {
-      push(`> węzeł ${i + 1}/${HOPS.length} → ${HOPS[i]}`, 'info');
-      await wait(isReal ? 45 : 180 + Math.random() * 180);
-      setEncStrength(Math.round(((i + 1) / HOPS.length) * 100));
-    }
-    if (isReal) connectReal();
-    else { push(`*** połączono z ${selected.name}`, 'ok'); setStatus('connected'); }
+    setBuffers([serverBuffer()]); setActiveId('server'); activeRef.current = 'server'; setStatus('connecting'); setEncStrength(0);
+    push('server', `> tunel do ${selected.host}:${selected.port}`, 'info'); await wait(120);
+    push('server', `> klucz x25519: ${randHex(20)}`, 'ok');
+    for (let index = 0; index < HOPS.length; index += 1) { push('server', `> węzeł ${index + 1}/${HOPS.length} → ${HOPS[index]}`, 'info'); await wait(isReal ? 35 : 130); setEncStrength(Math.round(((index + 1) / HOPS.length) * 100)); }
+    if (isReal) connectReal(); else { setStatus('connected'); push('server', `*** połączono z ${selected.name}`, 'ok'); }
   };
 
   const disconnect = () => {
+    intentionalCloseRef.current = true; if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current);
     if (realRef.current) sendRaw('QUIT :back to the desert of the real', false);
-    wsRef.current?.close(); wsRef.current = null; realRef.current = false;
-    push('*** rozłączono', 'warn'); setStatus('idle'); setChannel(''); setNicks([]); setEncStrength(0);
+    wsRef.current?.close(); wsRef.current = null; realRef.current = false; setStatus('idle'); setEncStrength(0); push('server', '*** rozłączono', 'warn'); openBuffer('server');
+  };
+
+  const activeTarget = active?.kind === 'server' ? '' : active?.label;
+  const closeActive = () => {
+    if (!active || active.kind === 'server') return;
+    if (active.kind === 'channel') sendRaw(`PART ${active.label} :do zobaczenia`);
+    setBuffers((previous) => previous.filter((buffer) => buffer.id !== active.id)); openBuffer('server');
   };
 
   const handleCommand = (value: string) => {
-    const [command, ...parts] = value.slice(1).split(' ');
-    const argument = parts.join(' ').trim();
-    switch (command.toLowerCase()) {
-      case 'join': if (argument) sendRaw(`JOIN ${argument}`); else push('Użycie: /join #kanał', 'warn'); break;
-      case 'part': sendRaw(`PART ${argument || channel} :do zobaczenia`); break;
+    const [command, ...parts] = value.slice(1).split(' '); const argument = parts.join(' ').trim(); const cmd = command.toLowerCase();
+    switch (cmd) {
+      case 'join': if (argument) sendRaw(`JOIN ${argument}`); else push(activeId, 'Użycie: /join #kanał', 'warn'); break;
+      case 'part': if (activeTarget || argument) sendRaw(`PART ${argument || activeTarget} :do zobaczenia`); break;
+      case 'query': if (argument) openBuffer(ensureBuffer(parts[0], 'query')); break;
+      case 'close': closeActive(); break;
       case 'nick': if (argument) sendRaw(`NICK ${argument}`); break;
-      case 'me': if (channel && argument) sendRaw(`PRIVMSG ${channel} :\u0001ACTION ${argument}\u0001`); break;
-      case 'msg': { const [target, ...words] = parts; if (target && words.length) sendRaw(`PRIVMSG ${target} :${words.join(' ')}`); break; }
+      case 'me': if (activeTarget && argument) { sendRaw(`PRIVMSG ${activeTarget} :\u0001ACTION ${argument}\u0001`, false); push(activeId, `${nickRef.current} ${argument}`, 'action'); } break;
+      case 'msg': { const [target, ...words] = parts; if (target && words.length) { sendRaw(`PRIVMSG ${target} :${words.join(' ')}`, false); const id = ensureBuffer(target, target.startsWith('#') ? 'channel' : 'query'); push(id, words.join(' '), 'msg', nickRef.current); } break; }
+      case 'notice': { const [target, ...words] = parts; if (target && words.length) sendRaw(`NOTICE ${target} :${words.join(' ')}`); break; }
+      case 'topic': if (active?.kind === 'channel') sendRaw(`TOPIC ${active.label}${argument ? ` :${argument}` : ''}`); break;
+      case 'mode': sendRaw(`MODE ${argument || activeTarget}`); break;
+      case 'kick': if (active?.kind === 'channel' && argument) sendRaw(`KICK ${active.label} ${argument}`); break;
+      case 'ban': if (active?.kind === 'channel' && argument) sendRaw(`MODE ${active.label} +b ${argument}`); break;
+      case 'invite': if (active?.kind === 'channel' && argument) sendRaw(`INVITE ${argument} ${active.label}`); break;
+      case 'away': sendRaw(`AWAY${argument ? ` :${argument}` : ''}`); break;
+      case 'names': sendRaw(`NAMES ${argument || activeTarget}`); break;
+      case 'list': sendRaw(`LIST${argument ? ` ${argument}` : ''}`); break;
       case 'whois': if (argument) sendRaw(`WHOIS ${argument}`); break;
       case 'quit': disconnect(); break;
       case 'raw': case 'quote': if (argument) sendRaw(argument); break;
-      case 'help': push('/join #kanał · /part · /nick nowy · /me tekst · /msg nick tekst · /whois nick · /raw KOMENDA · /quit', 'ok'); break;
+      case 'help': push(activeId, COMMANDS.join(' · '), 'ok'); break;
       default: sendRaw(value.slice(1));
     }
   };
 
-  const onSubmit = (event: FormEvent) => {
-    event.preventDefault();
-    const value = input.trim();
-    if (!value) return;
-    setInput('');
-    if (!realRef.current) { push(`‹ ${value}`, 'info'); push('// ten uplink jest filmową symulacją', 'warn'); return; }
+  const submitValue = (value: string) => {
+    if (!value) return; setHistory((previous) => [...previous.slice(-49), value]); setHistoryIndex(-1);
+    if (!realRef.current) { push(activeId, `‹ ${value}`, 'info'); push(activeId, '// ten uplink jest filmową symulacją', 'warn'); return; }
     if (value.startsWith('/')) { handleCommand(value); return; }
-    if (!channel) { push('Najpierw wejdź na kanał: /join #nazwa', 'warn'); return; }
-    sendRaw(`PRIVMSG ${channel} :${value}`, false);
-    push(value, 'msg', nick);
+    if (!activeTarget) { push('server', 'Najpierw wejdź na kanał: /join #nazwa', 'warn'); return; }
+    sendRaw(`PRIVMSG ${activeTarget} :${value}`, false); push(activeId, value, 'msg', nickRef.current);
   };
 
-  useEffect(() => {
-    if (status !== 'connected' || realRef.current) return;
-    const timer = setInterval(() => push(CHATTER[Math.floor(Math.random() * CHATTER.length)], 'msg'), 3200);
-    return () => clearInterval(timer);
-  }, [status]);
+  const onSubmit = (event: FormEvent) => { event.preventDefault(); const value = input.trim(); if (!value) return; setInput(''); submitValue(value); };
+  const onInputKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === 'Tab') {
+      event.preventDefault(); const start = input.lastIndexOf(' ') + 1; const fragment = input.slice(start).toLocaleLowerCase();
+      const choices = input.startsWith('/') && start === 0 ? COMMANDS : sortedNicks.map(stripRank);
+      const match = choices.find((choice) => choice.toLocaleLowerCase().startsWith(fragment));
+      if (match) setInput(`${input.slice(0, start)}${match}${start === 0 && !input.startsWith('/') ? ': ' : ' '}`);
+    } else if (event.key === 'ArrowUp' && history.length) { event.preventDefault(); const next = Math.min(history.length - 1, historyIndex + 1); setHistoryIndex(next); setInput(history[history.length - 1 - next]); }
+    else if (event.key === 'ArrowDown') { event.preventDefault(); const next = historyIndex - 1; setHistoryIndex(next); setInput(next < 0 ? '' : history[history.length - 1 - next]); }
+  };
+
+  useEffect(() => { if (status !== 'connected' || realRef.current) return; const timer = setInterval(() => push(activeRef.current, CHATTER[Math.floor(Math.random() * CHATTER.length)], 'msg'), 3200); return () => clearInterval(timer); }, [status]);
 
   return (
-    <section className="irc-shell w-full max-w-6xl mx-auto border border-border overflow-hidden" aria-label="Klient IRC">
+    <section className="irc-shell w-full max-w-7xl mx-auto border border-border overflow-hidden" aria-label="Klient IRC">
       <header className="irc-titlebar px-3 py-2 flex flex-wrap items-center justify-between gap-2 border-b border-border">
-        <div className="min-w-0">
-          <p className="font-mono text-sm font-bold text-foreground">▓ SECURE TUNNEL <span className="text-muted-foreground">/ IRC CLIENT</span></p>
-          <p className="text-[11px] text-muted-foreground truncate">{selected.host}:{selected.port} {channel ? `· ${channel}` : '· bez kanału'}</p>
-        </div>
-        <div className="flex items-center gap-1" aria-label="Wybór szaty graficznej">
-          {THEMES.map((item) => <Button key={item.id} size="sm" variant={theme === item.id ? 'default' : 'outline'} onClick={() => setTheme(item.id)} className="h-7 px-2 text-[10px] font-mono">{item.label}</Button>)}
-        </div>
+        <div className="min-w-0"><p className="font-mono text-sm font-bold text-foreground">▓ SECURE TUNNEL <span className="text-muted-foreground">/ IRC CLIENT</span></p><p className="text-[11px] text-muted-foreground truncate">{selected.host}:{selected.port} · {status}</p></div>
+        <div className="flex items-center gap-1" aria-label="Wybór szaty graficznej">{THEMES.map((item) => <Button key={item.id} size="sm" variant={theme === item.id ? 'default' : 'outline'} onClick={() => setTheme(item.id)} className="h-7 px-2 text-[10px] font-mono">{item.label}</Button>)}</div>
       </header>
 
-      <div className="grid lg:grid-cols-[190px_minmax(0,1fr)] min-h-[500px]">
-        <aside className="irc-sidebar border-b lg:border-b-0 lg:border-r border-border p-3">
-          <p className="text-[10px] font-bold text-muted-foreground mb-2">SERWERY</p>
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-1 gap-1.5">
-            {SERVERS.map((server) => (
-              <button key={server.id} onClick={() => status === 'idle' && setSelected(server)} disabled={status !== 'idle'} className={`server-row text-left px-2 py-2 border text-xs transition-colors ${selected.id === server.id ? 'is-active border-primary bg-primary/10 text-primary' : 'border-border text-muted-foreground hover:text-foreground'} disabled:opacity-50`}>
-                <span className="flex justify-between gap-2"><strong>{server.name}</strong><span>{server.ping}ms</span></span>
-                <span className="block opacity-70 truncate">{server.host}</span>
-              </button>
-            ))}
+      <div className={`grid min-h-[570px] ${showChats ? 'lg:grid-cols-[210px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
+        {showChats && <aside className="irc-sidebar border-b lg:border-b-0 lg:border-r border-border p-3 max-h-64 lg:max-h-none overflow-y-auto">
+          <div className="flex items-center justify-between mb-2"><p className="text-[10px] font-bold text-muted-foreground">SIEĆ I ROZMOWY</p><Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setShowChats(false)} aria-label="Ukryj rozmowy" title="Ukryj rozmowy"><ChevronLeft /></Button></div>
+          <label className="text-[10px] text-muted-foreground">SERWER</label>
+          <select value={selected.id} onChange={(event) => { const next = SERVERS.find((server) => server.id === event.target.value); if (next && status === 'idle') setSelected(next); }} disabled={status !== 'idle'} className="mt-1 mb-3 h-9 w-full border border-input bg-background px-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring" aria-label="Serwer IRC">{SERVERS.map((server) => <option key={server.id} value={server.id}>{server.name} · {server.ping}ms</option>)}</select>
+          <div className="space-y-1">
+            {buffers.map((buffer) => <button type="button" key={buffer.id} onClick={() => openBuffer(buffer.id)} className={`w-full flex items-center gap-2 px-2 py-2 border text-left text-xs transition-colors ${activeId === buffer.id ? 'border-primary bg-primary/10 text-primary' : 'border-transparent text-muted-foreground hover:bg-muted hover:text-foreground'}`}>
+              {buffer.kind === 'channel' ? <Hash className="h-3.5 w-3.5" /> : buffer.kind === 'query' ? <MessageSquare className="h-3.5 w-3.5" /> : <Menu className="h-3.5 w-3.5" />}<span className="truncate">{buffer.label}</span>
+              {buffer.unread > 0 && <span className={`ml-auto min-w-5 px-1 text-center ${buffer.mention ? 'bg-destructive text-destructive-foreground' : 'bg-primary text-primary-foreground'}`}>{buffer.unread}</span>}
+            </button>)}
           </div>
-          <div className="mt-3">
-            {status === 'idle' ? <Button onClick={connect} className="w-full font-mono">OPEN TUNNEL</Button> : <Button onClick={disconnect} variant="destructive" className="w-full font-mono"><LogOut className="w-4 h-4 mr-2" />ROZŁĄCZ</Button>}
-          </div>
+          <div className="mt-3">{status === 'idle' ? <Button onClick={connect} className="w-full font-mono">OPEN TUNNEL</Button> : <Button onClick={disconnect} variant="destructive" className="w-full font-mono"><LogOut />ROZŁĄCZ</Button>}</div>
           <div className="mt-3 text-[10px] text-muted-foreground font-mono leading-5">nick: <span className="text-foreground">{nick}</span><br />szyfrowanie: {encStrength}%<br />stan: {status}</div>
-        </aside>
+        </aside>}
 
-        <div className={`grid min-w-0 ${showNicks ? 'md:grid-cols-[minmax(0,1fr)_180px]' : 'grid-cols-1'}`}>
+        <div className={`grid min-w-0 ${showNicks && active?.kind === 'channel' ? 'md:grid-cols-[minmax(0,1fr)_190px]' : 'grid-cols-1'}`}>
           <div className="flex min-w-0 flex-col bg-card/70">
-            <div className="h-10 px-3 flex items-center justify-between border-b border-border bg-muted/60">
-              <strong className="text-sm truncate">{channel || (status === 'connected' ? 'Wybierz kanał: /join #nazwa' : 'Niepołączony')}</strong>
-              <Button size="icon" variant="ghost" onClick={() => setShowNicks((value) => !value)} title={showNicks ? 'Ukryj listę nicków' : 'Pokaż listę nicków'} aria-label={showNicks ? 'Ukryj listę nicków' : 'Pokaż listę nicków'}>
-                {showNicks ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </Button>
+            <div className="min-h-12 px-2 sm:px-3 flex items-center gap-2 border-b border-border bg-muted/60">
+              {!showChats && <Button size="icon" variant="ghost" onClick={() => setShowChats(true)} aria-label="Pokaż rozmowy" title="Pokaż rozmowy"><ChevronRight /></Button>}
+              <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="text-sm truncate">{active?.label || 'Status'}</strong>{active?.modes && <span className="text-[10px] text-muted-foreground">{active.modes}</span>}</div><p className="text-[10px] text-muted-foreground truncate">{active?.topic || (active?.kind === 'server' ? 'Komunikaty sieci' : 'Brak tematu kanału')}</p></div>
+              {active?.kind !== 'server' && <Button size="icon" variant="ghost" onClick={closeActive} aria-label="Zamknij rozmowę" title="Zamknij rozmowę"><X /></Button>}
+              {active?.kind === 'channel' && <Button size="icon" variant="ghost" onClick={() => setShowNicks((value) => !value)} aria-label={showNicks ? 'Ukryj nicki' : 'Pokaż nicki'} title={showNicks ? 'Ukryj nicki' : 'Pokaż nicki'}><Users /></Button>}
             </div>
-            <div ref={logRef} className="irc-log h-[400px] overflow-y-auto p-3 font-mono text-xs" aria-live="polite">
-              {logs.length === 0 && <div className="text-muted-foreground">// wybierz serwer, otwórz tunel i wpisz /join #kanał<br />// /help pokazuje listę komend</div>}
-              {logs.map((line, index) => (
-                <div key={`${index}-${line.text}`} className={`irc-line py-0.5 ${line.type === 'ok' ? 'text-primary' : line.type === 'warn' ? 'text-warning' : line.type === 'err' ? 'text-destructive' : line.type === 'msg' ? 'text-foreground' : 'text-muted-foreground'}`}>
-                  {line.nick && <strong className="nick-label text-primary">&lt;{line.nick}&gt; </strong>}{line.text}
-                </div>
-              ))}
+            <div ref={logRef} className="irc-log h-[462px] overflow-y-auto p-3 font-mono text-xs" aria-live="polite">
+              {!active?.logs.length && <div className="text-muted-foreground">// otwórz tunel i wpisz /join #kanał<br />// Tab uzupełnia nicki i komendy · ↑↓ przegląda historię</div>}
+              {active?.logs.map((line) => <div key={line.id} className={`irc-line grid grid-cols-[42px_minmax(0,1fr)] gap-2 py-0.5 ${line.type === 'ok' ? 'text-primary' : line.type === 'warn' ? 'text-warning' : line.type === 'err' ? 'text-destructive' : line.type === 'notice' ? 'text-secondary-foreground' : line.type === 'msg' ? 'text-foreground' : 'text-muted-foreground'}`}><time className="text-muted-foreground opacity-70">{line.time}</time><span className="min-w-0 break-words">{line.nick && <strong className="nick-label text-primary">&lt;{line.nick}&gt; </strong>}{line.type === 'action' && <span className="text-primary">* </span>}{line.text}</span></div>)}
             </div>
-            <form onSubmit={onSubmit} className="irc-input flex gap-2 p-2 border-t border-border bg-muted/40">
-              <span className="text-primary pt-2 font-mono">›</span>
-              <input value={input} onChange={(event) => setInput(event.target.value)} disabled={status !== 'connected'} placeholder={status === 'connected' ? (channel ? `Napisz do ${channel}…` : '/join #kanał') : 'Najpierw otwórz tunel'} className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground text-sm" aria-label="Wiadomość lub komenda IRC" />
-              <Button type="submit" size="icon" disabled={status !== 'connected'} title="Wyślij" aria-label="Wyślij"><Send className="w-4 h-4" /></Button>
-            </form>
+            <form onSubmit={onSubmit} className="irc-input flex gap-2 p-2 border-t border-border bg-muted/40"><span className="text-primary pt-2 font-mono">›</span><input ref={inputRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={onInputKeyDown} disabled={status !== 'connected'} placeholder={status === 'connected' ? (activeTarget ? `Napisz do ${activeTarget}…` : '/join #kanał') : 'Najpierw otwórz tunel'} className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground text-sm" aria-label="Wiadomość lub komenda IRC" /><Button type="submit" size="icon" disabled={status !== 'connected'} title="Wyślij" aria-label="Wyślij"><Send /></Button></form>
           </div>
 
-          {showNicks && <aside className="nick-panel border-t md:border-t-0 md:border-l border-border bg-muted/30 max-h-48 md:max-h-none overflow-y-auto">
-            <div className="h-10 px-3 flex items-center gap-2 border-b border-border text-xs font-bold"><Users className="w-4 h-4" /> NICKI <span className="ml-auto text-muted-foreground">{nicks.length}</span></div>
-            <div className="p-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-1 gap-1">
-              {sortedNicks.length ? sortedNicks.map((name) => <button type="button" key={name} onClick={() => setInput(`/msg ${stripRank(name)} `)} className="nick-row text-left truncate px-2 py-1 text-xs hover:bg-primary/10 hover:text-primary">{name}</button>) : <p className="col-span-full px-2 py-3 text-xs text-muted-foreground">Lista pojawi się po wejściu na kanał.</p>}
-            </div>
-          </aside>}
+          {showNicks && active?.kind === 'channel' && <aside className="nick-panel border-t md:border-t-0 md:border-l border-border bg-muted/30 max-h-52 md:max-h-none overflow-y-auto"><div className="h-10 px-3 flex items-center gap-2 border-b border-border text-xs font-bold"><Users /> NICKI <span className="ml-auto text-muted-foreground">{sortedNicks.length}</span></div><div className="p-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-1 gap-1">{sortedNicks.length ? sortedNicks.map((name) => {
+            const clean = stripRank(name); return <DropdownMenu key={name}><DropdownMenuTrigger asChild><Button type="button" variant="ghost" className="h-7 justify-start truncate px-2 text-xs font-normal">{name}</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuLabel>{clean}</DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem onSelect={() => openBuffer(ensureBuffer(clean, 'query'))}>Rozmowa prywatna</DropdownMenuItem><DropdownMenuItem onSelect={() => sendRaw(`WHOIS ${clean}`)}>WHOIS</DropdownMenuItem><DropdownMenuItem onSelect={() => { setInput(`${clean}: `); inputRef.current?.focus(); }}>Wstaw wzmiankę</DropdownMenuItem></DropdownMenuContent></DropdownMenu>;
+          }) : <p className="col-span-full px-2 py-3 text-xs text-muted-foreground">Lista pojawi się po wejściu na kanał.</p>}</div></aside>}
         </div>
       </div>
     </section>
@@ -256,5 +307,4 @@ const SecureTunnel = () => {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const randHex = (length: number) => Array.from({ length }, () => Math.floor(Math.random() * 16).toString(16)).join('');
-
 export default SecureTunnel;
