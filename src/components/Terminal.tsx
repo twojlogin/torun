@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
+import { ChevronDown, ChevronRight, TerminalSquare } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 
 interface TerminalLine {
   text: string;
@@ -7,6 +9,7 @@ interface TerminalLine {
 }
 
 const Terminal = () => {
+  const [isOpen, setIsOpen] = useState(false);
   const [lines, setLines] = useState<TerminalLine[]>([]);
   const [currentInput, setCurrentInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
@@ -211,17 +214,33 @@ const Terminal = () => {
 
   return (
     <div className="w-full max-w-4xl mx-auto bg-black/90 backdrop-blur-sm border border-primary/30 rounded-lg overflow-hidden">
-      <div className="bg-primary/20 px-4 py-2 flex items-center gap-2">
+      <div className="bg-primary/20 px-3 py-2 flex items-center gap-2">
         <div className="w-3 h-3 rounded-full bg-red-500"></div>
         <div className="w-3 h-3 rounded-full bg-yellow-500"></div>
         <div className="w-3 h-3 rounded-full bg-green-500"></div>
-        <span className="ml-4 text-primary font-mono text-sm">
+        <TerminalSquare className="ml-2 h-4 w-4 text-primary" aria-hidden="true" />
+        <span className="text-primary font-mono text-sm">
           Matrix Terminal v{secretMode ? '∞' : '1.0'} {secretMode && '🔓'}
         </span>
+        <Button
+          type="button"
+          size="icon"
+          variant="ghost"
+          className="ml-auto h-7 w-7 text-primary"
+          onClick={() => setIsOpen((value) => !value)}
+          aria-expanded={isOpen}
+          aria-controls="matrix-terminal-content"
+          aria-label={isOpen ? 'Zwiń terminal' : 'Rozwiń terminal'}
+          title={isOpen ? 'Zwiń terminal' : 'Rozwiń terminal'}
+        >
+          {isOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        </Button>
       </div>
-      
-      <div 
+
+      <div
+        id="matrix-terminal-content"
         ref={terminalRef}
+        hidden={!isOpen}
         className="h-96 overflow-y-auto p-4 font-mono text-sm cursor-text"
         onClick={handleTerminalClick}
       >
