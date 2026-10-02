@@ -1,11 +1,20 @@
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight, Hash, LogOut, Menu, MessageSquare, RefreshCw, Send, Users, X } from 'lucide-react';
+import { Bell, BellOff, ChevronLeft, ChevronRight, Hash, LogOut, Menu, MessageSquare, Search, Send, Settings, Users, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 
 type Theme = 'matrix' | 'mono' | 'pirc';
 type Status = 'idle' | 'connecting' | 'connected' | 'reconnecting';
-type LogType = 'info' | 'ok' | 'warn' | 'err' | 'msg' | 'notice' | 'action';
+type LogType = 'info' | 'ok' | 'warn' | 'err' | 'msg' | 'notice' | 'action' | 'event';
+type ProSettings = { nick: string; nickserv: string; autojoin: string; highlights: string; ignore: string; notify: boolean; sound: boolean; hideEvents: boolean; showMedia: boolean };
+const DEFAULT_SETTINGS: ProSettings = { nick: '', nickserv: '', autojoin: '', highlights: '', ignore: '', notify: false, sound: true, hideEvents: false, showMedia: true };
+const loadSettings = (): ProSettings => { try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem('irc-pro-settings') || '{}') }; } catch { return DEFAULT_SETTINGS; } };
+const splitList = (value: string) => value.split(/[,\s]+/).map((item) => item.trim()).filter(Boolean);
+const nickHue = (name: string) => { let hash = 0; for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) % 360; return hash; };
+const stripFormatting = (text: string) => text.replace(/\x03\d{0,2}(,\d{1,2})?|[\x02\x0F\x16\x1D\x1F\x1E]/g, '');
+const URL_RE = /(https?:\/\/[^\s<>"]+)/g;
+const beep = () => { try { const ctx = new AudioContext(); const osc = ctx.createOscillator(); const gain = ctx.createGain(); osc.frequency.value = 880; gain.gain.value = 0.05; osc.connect(gain).connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.12); } catch { /* audio blocked */ } };
+const RichText = ({ text, media }: { text: string; media: boolean }) => <>{stripFormatting(text).split(URL_RE).map((part, index) => URL_RE.test(part) || /^https?:\/\//.test(part) ? <span key={index}><a href={part} target="_blank" rel="noopener noreferrer" className="underline text-primary break-all">{part}</a>{media && /\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(part) && <img src={part} alt="Podgląd obrazka" loading="lazy" className="mt-1 block max-h-48 max-w-xs border border-border" />}</span> : <span key={index}>{part}</span>)}</>;
 type ChatLog = { id: number; text: string; type: LogType; nick?: string; time: string };
 type BufferKind = 'server' | 'channel' | 'query';
 type ChatBuffer = { id: string; label: string; kind: BufferKind; logs: ChatLog[]; nicks: string[]; topic: string; modes: string; unread: number; mention: boolean };
@@ -22,7 +31,7 @@ const SERVERS: Server[] = [
   { id: 'nebuchadnezzar', name: 'Nebuchadnezzar', host: 'neb.hovercraft.zion', port: 2317, network: 'HIDDEN', ping: 12 },
 ];
 const THEMES: { id: Theme; label: string }[] = [{ id: 'matrix', label: 'MATRIX' }, { id: 'mono', label: 'MONO' }, { id: 'pirc', label: 'PIRC' }];
-const COMMANDS = ['/join', '/part', '/query', '/close', '/nick', '/me', '/msg', '/notice', '/whois', '/topic', '/mode', '/kick', '/ban', '/invite', '/away', '/names', '/list', '/raw', '/quote', '/help', '/quit'];
+const COMMANDS = ['/join', '/part', '/query', '/close', '/nick', '/me', '/msg', '/notice', '/whois', '/topic', '/mode', '/kick', '/ban', '/invite', '/away', '/names', '/list', '/ignore', '/unignore', '/clear', '/search', '/ns', '/cs', '/raw', '/quote', '/help', '/quit'];
 const HOPS = ['entry-node.tor.exit', 'relay-fra.de', 'relay-ams.nl', 'relay-tok.jp', 'relay-sao.br', 'exit-node.zion'];
 const CHATTER = ['<morpheus> the signal is clean', '<trinity> route confirmed', '<oracle> cookies are ready', '*** dozer has joined #zion', '<neo> whoa.'];
 const serverBuffer = (): ChatBuffer => ({ id: 'server', label: 'Status', kind: 'server', logs: [], nicks: [], topic: '', modes: '', unread: 0, mention: false });
@@ -39,7 +48,12 @@ const SecureTunnel = () => {
   const [buffers, setBuffers] = useState<ChatBuffer[]>([serverBuffer()]);
   const [activeId, setActiveId] = useState('server');
   const [encStrength, setEncStrength] = useState(0);
-  const [nick, setNick] = useState(() => `neo_${Math.floor(Math.random() * 9999)}`);
+  const [settings, setSettings] = useState<ProSettings>(loadSettings);
+  const [showSettings, setShowSettings] = useState(false);
+  const [search, setSearch] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const settingsRef = useRef(settings);
+  const [nick, setNick] = useState(() => loadSettings().nick || `neo_${Math.floor(Math.random() * 9999)}`);
   const [input, setInput] = useState('');
   const [showNicks, setShowNicks] = useState(true);
   const [showChats, setShowChats] = useState(true);
@@ -61,6 +75,12 @@ const SecureTunnel = () => {
   const sortedNicks = useMemo(() => [...(active?.nicks ?? [])].sort((a, b) => rank(a) - rank(b) || stripRank(a).localeCompare(stripRank(b))), [active?.nicks]);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; localStorage.setItem('matrix-theme', theme); }, [theme]);
+  useEffect(() => { settingsRef.current = settings; localStorage.setItem('irc-pro-settings', JSON.stringify(settings)); }, [settings]);
+  const updateSetting = <K extends keyof ProSettings>(key: K, value: ProSettings[K]) => setSettings((previous) => ({ ...previous, [key]: value }));
+  const toggleNotify = async () => {
+    if (!settings.notify && 'Notification' in window && Notification.permission !== 'granted') { const result = await Notification.requestPermission(); if (result !== 'granted') return; }
+    updateSetting('notify', !settings.notify);
+  };
   useEffect(() => { nickRef.current = nick; }, [nick]);
   useEffect(() => { activeRef.current = activeId; }, [activeId]);
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [active?.logs]);
@@ -74,7 +94,14 @@ const SecureTunnel = () => {
 
   const push = (target: string, text: string, type: LogType = 'info', messageNick?: string) => {
     const id = normalizeId(target || 'server');
-    const mention = type === 'msg' && text.toLocaleLowerCase().includes(nickRef.current.toLocaleLowerCase());
+    const lower = text.toLocaleLowerCase();
+    const fromOther = messageNick && messageNick !== nickRef.current;
+    const mention = Boolean(fromOther) && (type === 'msg' || type === 'action') && [nickRef.current, ...splitList(settingsRef.current.highlights)].some((word) => lower.includes(word.toLocaleLowerCase()));
+    const isQuery = Boolean(fromOther) && !target.startsWith('#') && id !== 'server';
+    if ((mention || isQuery) && (document.hidden || activeRef.current !== id)) {
+      if (settingsRef.current.sound) beep();
+      if (settingsRef.current.notify && 'Notification' in window && Notification.permission === 'granted') new Notification(`${messageNick} · ${target}`, { body: stripFormatting(text).slice(0, 140) });
+    }
     setBuffers((previous) => previous.map((buffer) => buffer.id === id ? {
       ...buffer,
       logs: [...buffer.logs.slice(-399), { id: ++logId, text, type, nick: messageNick, time: now() }],
@@ -125,24 +152,25 @@ const SecureTunnel = () => {
       const id = ensureBuffer(joined, 'channel');
       if (source === nickRef.current) { openBuffer(id); sendRaw(`NAMES ${joined}`, false); sendRaw(`TOPIC ${joined}`, false); }
       setBuffers((previous) => previous.map((buffer) => buffer.id === id && !buffer.nicks.some((entry) => stripRank(entry) === source) ? { ...buffer, nicks: [...buffer.nicks, source] } : buffer));
-      push(id, `${source} dołącza do ${joined}`, 'ok'); return;
+      push(id, `${source} dołącza do ${joined}`, 'event'); return;
     }
     if (command === 'PART') {
       const target = params[0] || activeRef.current;
       if (source === nickRef.current) { setBuffers((previous) => previous.filter((buffer) => buffer.id !== normalizeId(target))); openBuffer('server'); }
-      else { setBuffers((previous) => previous.map((buffer) => buffer.id === normalizeId(target) ? { ...buffer, nicks: buffer.nicks.filter((entry) => stripRank(entry) !== source) } : buffer)); push(target, `${source} opuszcza kanał${trailing ? ` · ${trailing}` : ''}`, 'warn'); }
+      else { setBuffers((previous) => previous.map((buffer) => buffer.id === normalizeId(target) ? { ...buffer, nicks: buffer.nicks.filter((entry) => stripRank(entry) !== source) } : buffer)); push(target, `${source} opuszcza kanał${trailing ? ` · ${trailing}` : ''}`, 'event'); }
       return;
     }
-    if (command === 'QUIT') { removeNick(source); buffers.filter((buffer) => buffer.nicks.some((entry) => stripRank(entry) === source)).forEach((buffer) => push(buffer.id, `${source} rozłącza się${trailing ? ` · ${trailing}` : ''}`, 'warn')); return; }
+    if (command === 'QUIT') { removeNick(source); buffers.filter((buffer) => buffer.nicks.some((entry) => stripRank(entry) === source)).forEach((buffer) => push(buffer.id, `${source} rozłącza się${trailing ? ` · ${trailing}` : ''}`, 'event')); return; }
     if (command === 'NICK') {
       const nextNick = (trailing || params[0]).replace(/^:/, '');
       setBuffers((previous) => previous.map((buffer) => ({ ...buffer, nicks: buffer.nicks.map((entry) => stripRank(entry) === source ? `${entry.match(/^[@+%&~]/)?.[0] || ''}${nextNick}` : entry) })));
       if (source === nickRef.current) setNick(nextNick);
-      buffers.filter((buffer) => buffer.nicks.some((entry) => stripRank(entry) === source)).forEach((buffer) => push(buffer.id, `${source} zmienia nick na ${nextNick}`, 'info'));
+      buffers.filter((buffer) => buffer.nicks.some((entry) => stripRank(entry) === source)).forEach((buffer) => push(buffer.id, `${source} zmienia nick na ${nextNick}`, 'event'));
       return;
     }
     if (command === 'PRIVMSG' || command === 'NOTICE') {
       const target = params[0] || 'server';
+      if (splitList(settingsRef.current.ignore).some((entry) => entry.toLocaleLowerCase() === source.toLocaleLowerCase())) return;
       const isPrivate = normalizeId(target) === normalizeId(nickRef.current);
       const bufferLabel = isPrivate ? source : target;
       const id = ensureBuffer(bufferLabel, isPrivate ? 'query' : 'channel');
@@ -169,6 +197,14 @@ const SecureTunnel = () => {
       push(target, `${source} wyrzuca ${kicked}${trailing ? ` · ${trailing}` : ''}`, 'warn'); return;
     }
     if (command === 'INVITE') { push('server', `${source} zaprasza Cię na ${trailing || params[1]}`, 'notice'); return; }
+    if (command === '001') {
+      push('server', trailing || rest, 'ok');
+      const s = settingsRef.current;
+      if (s.nickserv) sendRaw(`PRIVMSG NickServ :IDENTIFY ${s.nickserv}`, false);
+      const channels = splitList(s.autojoin).map((channel) => channel.startsWith('#') ? channel : `#${channel}`);
+      if (channels.length) setTimeout(() => sendRaw(`JOIN ${channels.join(',')}`), s.nickserv ? 1500 : 200);
+      return;
+    }
     if (/^4\d\d$/.test(command) || command === 'ERROR') push('server', trailing || rest, 'err');
     else if (/^\d{3}$/.test(command)) push('server', trailing || rest, 'info');
   };
@@ -234,6 +270,12 @@ const SecureTunnel = () => {
       case 'quit': disconnect(); break;
       case 'raw': case 'quote': if (argument) sendRaw(argument); break;
       case 'help': push(activeId, COMMANDS.join(' · '), 'ok'); break;
+      case 'ignore': if (argument) { updateSetting('ignore', Array.from(new Set([...splitList(settings.ignore), argument])).join(', ')); push(activeId, `Ignoruję ${argument}`, 'ok'); } else push(activeId, `Ignorowani: ${settings.ignore || 'nikt'}`, 'info'); break;
+      case 'unignore': updateSetting('ignore', splitList(settings.ignore).filter((entry) => entry.toLocaleLowerCase() !== argument.toLocaleLowerCase()).join(', ')); push(activeId, `Nie ignoruję ${argument}`, 'ok'); break;
+      case 'clear': setBuffers((previous) => previous.map((buffer) => buffer.id === activeId ? { ...buffer, logs: [] } : buffer)); break;
+      case 'search': setShowSearch(true); setSearch(argument); break;
+      case 'ns': case 'nickserv': if (argument) sendRaw(`PRIVMSG NickServ :${argument}`, false); break;
+      case 'cs': case 'chanserv': if (argument) sendRaw(`PRIVMSG ChanServ :${argument}`, false); break;
       default: sendRaw(value.slice(1));
     }
   };
@@ -263,8 +305,20 @@ const SecureTunnel = () => {
     <section className="irc-shell w-full max-w-7xl mx-auto border border-border overflow-hidden" aria-label="Klient IRC">
       <header className="irc-titlebar px-3 py-2 flex flex-wrap items-center justify-between gap-2 border-b border-border">
         <div className="min-w-0"><p className="font-mono text-sm font-bold text-foreground">▓ SECURE TUNNEL <span className="text-muted-foreground">/ IRC CLIENT</span></p><p className="text-[11px] text-muted-foreground truncate">{selected.host}:{selected.port} · {status}</p></div>
-        <div className="flex items-center gap-1" aria-label="Wybór szaty graficznej">{THEMES.map((item) => <Button key={item.id} size="sm" variant={theme === item.id ? 'default' : 'outline'} onClick={() => setTheme(item.id)} className="h-7 px-2 text-[10px] font-mono">{item.label}</Button>)}</div>
+        <div className="flex items-center gap-1">
+          <Button size="icon" variant={showSearch ? 'default' : 'ghost'} className="h-7 w-7" onClick={() => setShowSearch((value) => !value)} aria-label="Szukaj w rozmowie" title="Szukaj w rozmowie"><Search /></Button>
+          <Button size="icon" variant={settings.notify ? 'default' : 'ghost'} className="h-7 w-7" onClick={toggleNotify} aria-label="Powiadomienia" title="Powiadomienia o wzmiankach i privach">{settings.notify ? <Bell /> : <BellOff />}</Button>
+          <Button size="icon" variant={showSettings ? 'default' : 'ghost'} className="h-7 w-7" onClick={() => setShowSettings((value) => !value)} aria-label="Ustawienia" title="Ustawienia"><Settings /></Button>
+          <div className="flex items-center gap-1 ml-1" aria-label="Wybór szaty graficznej">{THEMES.map((item) => <Button key={item.id} size="sm" variant={theme === item.id ? 'default' : 'outline'} onClick={() => setTheme(item.id)} className="h-7 px-2 text-[10px] font-mono">{item.label}</Button>)}</div>
+        </div>
       </header>
+      {showSettings && <div className="grid gap-3 border-b border-border bg-muted/40 p-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+        {([['nick', 'Stały nick', 'np. arek'], ['nickserv', 'Hasło NickServ (auto-identify)', '••••••'], ['autojoin', 'Auto-join kanały', '#polska, #linux'], ['highlights', 'Słowa wyróżniające', 'arek, admin'], ['ignore', 'Ignorowani', 'spamer1, bot2']] as const).map(([key, label, placeholder]) => <label key={key} className="flex flex-col gap-1 text-muted-foreground">{label}<input type={key === 'nickserv' ? 'password' : 'text'} value={settings[key]} placeholder={placeholder} onChange={(event) => { updateSetting(key, event.target.value); if (key === 'nick' && status === 'idle' && event.target.value) setNick(event.target.value); }} className="h-8 border border-input bg-background px-2 text-foreground outline-none focus:ring-2 focus:ring-ring" /></label>)}
+        <div className="flex flex-col gap-1 text-muted-foreground">
+          {([['sound', 'Dźwięk przy wzmiance'], ['hideEvents', 'Ukryj wejścia/wyjścia'], ['showMedia', 'Podgląd obrazków z linków']] as const).map(([key, label]) => <label key={key} className="flex items-center gap-2"><input type="checkbox" checked={settings[key]} onChange={(event) => updateSetting(key, event.target.checked)} className="accent-primary" />{label}</label>)}
+        </div>
+        <p className="text-[10px] text-muted-foreground sm:col-span-2 lg:col-span-4">Ustawienia zapisują się tylko w tej przeglądarce. Hasło NickServ jest wysyłane wyłącznie do serwera IRC.</p>
+      </div>}
 
       <div className={`grid min-h-[570px] ${showChats ? 'lg:grid-cols-[210px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
         {showChats && <aside className="irc-sidebar border-b lg:border-b-0 lg:border-r border-border p-3 max-h-64 lg:max-h-none overflow-y-auto">
@@ -289,9 +343,13 @@ const SecureTunnel = () => {
               {active?.kind !== 'server' && <Button size="icon" variant="ghost" onClick={closeActive} aria-label="Zamknij rozmowę" title="Zamknij rozmowę"><X /></Button>}
               {active?.kind === 'channel' && <Button size="icon" variant="ghost" onClick={() => setShowNicks((value) => !value)} aria-label={showNicks ? 'Ukryj nicki' : 'Pokaż nicki'} title={showNicks ? 'Ukryj nicki' : 'Pokaż nicki'}><Users /></Button>}
             </div>
-            <div ref={logRef} className="irc-log h-[462px] overflow-y-auto p-3 font-mono text-xs" aria-live="polite">
-              {!active?.logs.length && <div className="text-muted-foreground">// otwórz tunel i wpisz /join #kanał<br />// Tab uzupełnia nicki i komendy · ↑↓ przegląda historię</div>}
-              {active?.logs.map((line) => <div key={line.id} className={`irc-line grid grid-cols-[42px_minmax(0,1fr)] gap-2 py-0.5 ${line.type === 'ok' ? 'text-primary' : line.type === 'warn' ? 'text-warning' : line.type === 'err' ? 'text-destructive' : line.type === 'notice' ? 'text-secondary-foreground' : line.type === 'msg' ? 'text-foreground' : 'text-muted-foreground'}`}><time className="text-muted-foreground opacity-70">{line.time}</time><span className="min-w-0 break-words">{line.nick && <strong className="nick-label text-primary">&lt;{line.nick}&gt; </strong>}{line.type === 'action' && <span className="text-primary">* </span>}{line.text}</span></div>)}
+            {showSearch && <div className="flex items-center gap-2 border-b border-border px-3 py-1.5"><Search className="h-3.5 w-3.5 text-muted-foreground" /><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Szukaj w tej rozmowie…" className="flex-1 bg-transparent text-xs text-foreground outline-none" aria-label="Szukaj w rozmowie" /><Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => { setSearch(''); setShowSearch(false); }} aria-label="Zamknij szukanie"><X /></Button></div>}
+            <div ref={logRef} className={`irc-log ${showSearch ? 'h-[426px]' : 'h-[462px]'} overflow-y-auto p-3 font-mono text-xs`} aria-live="polite">
+              {!active?.logs.length && <div className="text-muted-foreground">// otwórz tunel i wpisz /join #kanał<br />// Tab uzupełnia nicki i komendy · ↑↓ przegląda historię · ⚙ ustawienia: auto-join, NickServ, powiadomienia</div>}
+              {active?.logs.filter((line) => !(settings.hideEvents && line.type === 'event') && (!search || `${line.nick ?? ''} ${line.text}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()))).map((line) => {
+                const highlighted = line.nick && line.nick !== nick && [nick, ...splitList(settings.highlights)].some((word) => line.text.toLocaleLowerCase().includes(word.toLocaleLowerCase()));
+                return <div key={line.id} className={`irc-line grid grid-cols-[42px_minmax(0,1fr)] gap-2 py-0.5 ${highlighted ? 'bg-primary/15 border-l-2 border-primary pl-1' : ''} ${line.type === 'ok' ? 'text-primary' : line.type === 'warn' ? 'text-warning' : line.type === 'err' ? 'text-destructive' : line.type === 'notice' ? 'text-secondary-foreground' : line.type === 'msg' ? 'text-foreground' : line.type === 'event' ? 'text-muted-foreground opacity-70' : 'text-muted-foreground'}`}><time className="text-muted-foreground opacity-70">{line.time}</time><span className="min-w-0 break-words">{line.nick && <strong className="nick-label" style={theme === 'mono' ? undefined : { color: `hsl(${nickHue(line.nick)} 75% 60%)` }}>&lt;{line.nick}&gt; </strong>}{line.type === 'action' && <span className="text-primary">* </span>}<RichText text={line.text} media={settings.showMedia} /></span></div>;
+              })}
             </div>
             <form onSubmit={onSubmit} className="irc-input flex gap-2 p-2 border-t border-border bg-muted/40"><span className="text-primary pt-2 font-mono">›</span><input ref={inputRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={onInputKeyDown} disabled={status !== 'connected'} placeholder={status === 'connected' ? (activeTarget ? `Napisz do ${activeTarget}…` : '/join #kanał') : 'Najpierw otwórz tunel'} className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground text-sm" aria-label="Wiadomość lub komenda IRC" /><Button type="submit" size="icon" disabled={status !== 'connected'} title="Wyślij" aria-label="Wyślij"><Send /></Button></form>
           </div>
