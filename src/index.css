@@ -125,3 +125,54 @@
 :root[data-theme="pirc"] .irc-titlebar .text-muted-foreground { color: hsl(var(--primary-foreground)); }
 :root[data-theme="pirc"] .irc-shell { box-shadow: 0 12px 35px hsl(var(--foreground) / .14); }
 
+
+/* ---------- Premium IRC layer ---------- */
+:root { --glow: 0 0 24px hsl(var(--primary) / .25); }
+.irc-shell { border-radius: 1rem; border: 1px solid hsl(var(--primary) / .28); background: linear-gradient(160deg, hsl(var(--card) / .92), hsl(var(--background) / .9)); backdrop-filter: blur(14px); box-shadow: 0 0 0 1px hsl(var(--primary) / .06) inset, 0 30px 80px -20px hsl(var(--primary) / .25), 0 20px 50px hsl(var(--background) / .6); }
+.irc-titlebar { background: linear-gradient(90deg, hsl(var(--primary) / .16), hsl(var(--primary) / .03)); }
+.irc-chip { font-size: 10px; padding: 1px 8px; border-radius: 999px; border: 1px solid hsl(var(--primary) / .3); background: hsl(var(--primary) / .08); color: hsl(var(--muted-foreground)); font-family: monospace; }
+.irc-status-dot { width: 10px; height: 10px; border-radius: 999px; flex-shrink: 0; }
+.irc-status-dot.is-on { background: hsl(var(--primary)); box-shadow: 0 0 10px hsl(var(--primary)); }
+.irc-status-dot.is-off { background: hsl(var(--destructive)); box-shadow: 0 0 8px hsl(var(--destructive) / .7); }
+.irc-status-dot.is-busy { background: hsl(var(--warning)); animation: irc-pulse 1s ease-in-out infinite; }
+@keyframes irc-pulse { 50% { opacity: .3; transform: scale(.75); } }
+.irc-segment { display: flex; padding: 2px; border-radius: 999px; border: 1px solid hsl(var(--border)); background: hsl(var(--background) / .5); }
+.irc-segment button { font: 700 10px monospace; letter-spacing: .08em; padding: 4px 10px; border-radius: 999px; color: hsl(var(--muted-foreground)); transition: all .2s; }
+.irc-segment button.is-active { background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); box-shadow: var(--glow); }
+.irc-sidebar { background: hsl(var(--background) / .35); }
+.irc-field { height: 36px; border-radius: .5rem; border: 1px solid hsl(var(--input)); background: hsl(var(--background) / .7); padding: 0 10px; color: hsl(var(--foreground)); outline: none; transition: box-shadow .2s, border-color .2s; }
+.irc-field:focus { border-color: hsl(var(--primary)); box-shadow: 0 0 0 3px hsl(var(--primary) / .18); }
+.irc-buffer { position: relative; width: 100%; display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: .5rem; font-size: 12px; text-align: left; color: hsl(var(--muted-foreground)); transition: background .15s, color .15s; }
+.irc-buffer:hover { background: hsl(var(--muted)); color: hsl(var(--foreground)); }
+.irc-buffer.is-active { background: hsl(var(--primary) / .12); color: hsl(var(--primary)); }
+.irc-buffer.is-active::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 3px; border-radius: 3px; background: hsl(var(--primary)); box-shadow: var(--glow); }
+.irc-buffer.is-mention { color: hsl(var(--warning)); }
+.irc-badge { min-width: 20px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 700; text-align: center; background: hsl(var(--primary)); color: hsl(var(--primary-foreground)); }
+.irc-badge.is-mention { background: hsl(var(--warning)); color: hsl(var(--background)); }
+.irc-avatar { display: inline-flex; flex-shrink: 0; align-items: center; justify-content: center; border-radius: 999px; font: 700 11px sans-serif; color: hsl(0 0% 100%); background: hsl(var(--muted)); box-shadow: 0 0 0 1px hsl(var(--border)); }
+:root[data-theme="mono"] .irc-avatar { color: hsl(var(--foreground)); }
+.irc-line { animation: irc-in .25s ease-out; }
+@keyframes irc-in { from { opacity: 0; transform: translateY(4px); } }
+.irc-sys { display: grid; grid-template-columns: 42px minmax(0,1fr); gap: 8px; padding: 2px 6px; font-size: 11px; }
+.irc-sys time { opacity: .5; }
+.irc-msg { display: grid; grid-template-columns: 32px minmax(0,1fr); gap: 10px; padding: 6px 8px; margin-top: 4px; border-radius: .5rem; transition: background .15s; }
+.irc-msg.is-grouped { margin-top: 0; padding-top: 1px; }
+.irc-msg:hover { background: hsl(var(--muted) / .5); }
+.irc-msg.is-mention { background: hsl(var(--warning) / .1); box-shadow: inset 3px 0 0 hsl(var(--warning)); }
+.irc-hover-time { font-size: 9px; opacity: 0; color: hsl(var(--muted-foreground)); padding-top: 3px; }
+.irc-msg:hover .irc-hover-time { opacity: .7; }
+.irc-rank { font-size: 9px; text-transform: uppercase; letter-spacing: .06em; padding: 0 6px; border-radius: 999px; background: hsl(var(--primary) / .15); color: hsl(var(--primary)); margin-left: auto; }
+.irc-rank.is-voice { background: hsl(var(--warning) / .15); color: hsl(var(--warning)); }
+.irc-nick-row { display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px; border-radius: .5rem; font-size: 12px; color: hsl(var(--foreground)); transition: background .15s; }
+.irc-nick-row:hover { background: hsl(var(--muted)); }
+.irc-composer { display: flex; align-items: center; gap: 10px; padding: 4px 4px 4px 14px; border-radius: 999px; border: 1px solid hsl(var(--input)); background: hsl(var(--background) / .6); transition: box-shadow .2s, border-color .2s; }
+.irc-composer:focus-within { border-color: hsl(var(--primary)); box-shadow: 0 0 0 3px hsl(var(--primary) / .15), var(--glow); }
+.irc-empty { display: grid; place-items: center; gap: 6px; height: 100%; text-align: center; color: hsl(var(--muted-foreground)); }
+.irc-empty kbd { padding: 1px 6px; border-radius: 4px; border: 1px solid hsl(var(--border)); background: hsl(var(--muted)); font-size: 10px; }
+.irc-dialog { border-color: hsl(var(--primary) / .3); box-shadow: 0 30px 80px -20px hsl(var(--primary) / .3); }
+.irc-settings-section { display: grid; gap: 10px; padding: 14px; border-radius: .75rem; border: 1px solid hsl(var(--border)); background: hsl(var(--muted) / .3); }
+.irc-section-title { font: 700 10px monospace; letter-spacing: .15em; text-transform: uppercase; color: hsl(var(--primary)); }
+.irc-log::-webkit-scrollbar { width: 6px; }
+.irc-log::-webkit-scrollbar-thumb { background: hsl(var(--primary) / .35); border-radius: 6px; }
+:root[data-theme="mono"] .irc-shell, :root[data-theme="pirc"] .irc-shell { box-shadow: 0 20px 50px hsl(var(--foreground) / .12); border-color: hsl(var(--border)); }
+:root[data-theme="pirc"] .irc-chip { color: hsl(var(--primary-foreground)); border-color: hsl(var(--primary-foreground) / .4); background: hsl(var(--primary-foreground) / .12); }
