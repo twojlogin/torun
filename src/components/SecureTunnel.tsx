@@ -2,6 +2,9 @@ import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from '
 import { Bell, BellOff, ChevronLeft, ChevronRight, Hash, LogOut, Menu, MessageSquare, Search, Send, Settings, Users, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Switch } from '@/components/ui/switch';
+const Avatar = ({ name, size = 'h-6 w-6', mono }: { name: string; size?: string; mono?: boolean }) => { const hue = nickHue(name); return <span aria-hidden="true" className={`irc-avatar ${size}`} style={mono ? undefined : { background: `linear-gradient(135deg, hsl(${hue} 70% 45%), hsl(${(hue + 40) % 360} 75% 30%))` }}>{name.replace(/^[^a-z0-9]+/i, '').charAt(0).toUpperCase() || '?'}</span>; };
 
 type Theme = 'matrix' | 'mono' | 'pirc';
 type Status = 'idle' | 'connecting' | 'connected' | 'reconnecting';
@@ -302,23 +305,27 @@ const SecureTunnel = () => {
   useEffect(() => { if (status !== 'connected' || realRef.current) return; const timer = setInterval(() => push(activeRef.current, CHATTER[Math.floor(Math.random() * CHATTER.length)], 'msg'), 3200); return () => clearInterval(timer); }, [status]);
 
   return (
-    <section className="irc-shell w-full max-w-7xl mx-auto border border-border overflow-hidden" aria-label="Klient IRC">
-      <header className="irc-titlebar px-3 py-2 flex flex-wrap items-center justify-between gap-2 border-b border-border">
-        <div className="min-w-0"><p className="font-mono text-sm font-bold text-foreground">▓ SECURE TUNNEL <span className="text-muted-foreground">/ IRC CLIENT</span></p><p className="text-[11px] text-muted-foreground truncate">{selected.host}:{selected.port} · {status}</p></div>
+    <section className="irc-shell w-full max-w-7xl mx-auto overflow-hidden" aria-label="Klient IRC">
+      <header className="irc-titlebar px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-border">
+        <div className="min-w-0 flex items-center gap-3">
+          <span className={`irc-status-dot ${status === 'connected' ? 'is-on' : status === 'idle' ? 'is-off' : 'is-busy'}`} aria-hidden="true" />
+          <div className="min-w-0"><p className="font-mono text-sm font-bold tracking-wider text-foreground">SECURE TUNNEL <span className="text-muted-foreground font-normal">/ IRC</span></p>
+          <div className="flex flex-wrap items-center gap-1.5 mt-0.5"><span className="irc-chip">{selected.name}</span><span className="irc-chip">{nick}</span><span className="irc-chip">{status === 'connected' ? 'online' : status === 'idle' ? 'offline' : status === 'connecting' ? 'łączenie…' : 'ponawianie…'}</span>{encStrength > 0 && <span className="irc-chip">🔒 {encStrength}%</span>}</div></div>
+        </div>
         <div className="flex items-center gap-1">
-          <Button size="icon" variant={showSearch ? 'default' : 'ghost'} className="h-7 w-7" onClick={() => setShowSearch((value) => !value)} aria-label="Szukaj w rozmowie" title="Szukaj w rozmowie"><Search /></Button>
-          <Button size="icon" variant={settings.notify ? 'default' : 'ghost'} className="h-7 w-7" onClick={toggleNotify} aria-label="Powiadomienia" title="Powiadomienia o wzmiankach i privach">{settings.notify ? <Bell /> : <BellOff />}</Button>
-          <Button size="icon" variant={showSettings ? 'default' : 'ghost'} className="h-7 w-7" onClick={() => setShowSettings((value) => !value)} aria-label="Ustawienia" title="Ustawienia"><Settings /></Button>
-          <div className="flex items-center gap-1 ml-1" aria-label="Wybór szaty graficznej">{THEMES.map((item) => <Button key={item.id} size="sm" variant={theme === item.id ? 'default' : 'outline'} onClick={() => setTheme(item.id)} className="h-7 px-2 text-[10px] font-mono">{item.label}</Button>)}</div>
+          <Button size="icon" variant={showSearch ? 'default' : 'ghost'} className="h-8 w-8 rounded-full" onClick={() => setShowSearch((value) => !value)} aria-label="Szukaj w rozmowie" title="Szukaj w rozmowie"><Search /></Button>
+          <Button size="icon" variant={settings.notify ? 'default' : 'ghost'} className="h-8 w-8 rounded-full" onClick={toggleNotify} aria-label="Powiadomienia" title="Powiadomienia o wzmiankach i privach">{settings.notify ? <Bell /> : <BellOff />}</Button>
+          <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" onClick={() => setShowSettings(true)} aria-label="Ustawienia" title="Ustawienia"><Settings /></Button>
+          <div className="irc-segment ml-1" aria-label="Wybór szaty graficznej">{THEMES.map((item) => <button type="button" key={item.id} onClick={() => setTheme(item.id)} className={theme === item.id ? 'is-active' : ''}>{item.label}</button>)}</div>
         </div>
       </header>
-      {showSettings && <div className="grid gap-3 border-b border-border bg-muted/40 p-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
-        {([['nick', 'Stały nick', 'np. arek'], ['nickserv', 'Hasło NickServ (auto-identify)', '••••••'], ['autojoin', 'Auto-join kanały', '#polska, #linux'], ['highlights', 'Słowa wyróżniające', 'arek, admin'], ['ignore', 'Ignorowani', 'spamer1, bot2']] as const).map(([key, label, placeholder]) => <label key={key} className="flex flex-col gap-1 text-muted-foreground">{label}<input type={key === 'nickserv' ? 'password' : 'text'} value={settings[key]} placeholder={placeholder} onChange={(event) => { updateSetting(key, event.target.value); if (key === 'nick' && status === 'idle' && event.target.value) setNick(event.target.value); }} className="h-8 border border-input bg-background px-2 text-foreground outline-none focus:ring-2 focus:ring-ring" /></label>)}
-        <div className="flex flex-col gap-1 text-muted-foreground">
-          {([['sound', 'Dźwięk przy wzmiance'], ['hideEvents', 'Ukryj wejścia/wyjścia'], ['showMedia', 'Podgląd obrazków z linków']] as const).map(([key, label]) => <label key={key} className="flex items-center gap-2"><input type="checkbox" checked={settings[key]} onChange={(event) => updateSetting(key, event.target.checked)} className="accent-primary" />{label}</label>)}
-        </div>
-        <p className="text-[10px] text-muted-foreground sm:col-span-2 lg:col-span-4">Ustawienia zapisują się tylko w tej przeglądarce. Hasło NickServ jest wysyłane wyłącznie do serwera IRC.</p>
-      </div>}
+      <Dialog open={showSettings} onOpenChange={setShowSettings}>
+        <DialogContent className="irc-dialog max-w-lg max-h-[85vh] overflow-y-auto">
+          <DialogHeader><DialogTitle className="font-mono tracking-wider">Ustawienia klienta</DialogTitle><DialogDescription>Zapisywane tylko w tej przeglądarce. Hasło NickServ trafia wyłącznie do serwera IRC.</DialogDescription></DialogHeader>
+          {([['Konto', [['nick', 'Stały nick', 'np. arek'], ['nickserv', 'Hasło NickServ (auto-identify)', '••••••']]], ['Kanały', [['autojoin', 'Auto-join kanały', '#polska, #linux'], ['highlights', 'Słowa wyróżniające', 'arek, admin'], ['ignore', 'Ignorowani', 'spamer1, bot2']]]] as const).map(([section, fields]) => <div key={section} className="irc-settings-section"><p className="irc-section-title">{section}</p>{fields.map(([key, label, placeholder]) => <label key={key} className="flex flex-col gap-1 text-xs text-muted-foreground">{label}<input type={key === 'nickserv' ? 'password' : 'text'} value={settings[key]} placeholder={placeholder} onChange={(event) => { updateSetting(key, event.target.value); if (key === 'nick' && status === 'idle' && event.target.value) setNick(event.target.value); }} className="irc-field" /></label>)}</div>)}
+          {([['Powiadomienia', [['sound', 'Dźwięk przy wzmiance']]], ['Wygląd', [['hideEvents', 'Ukryj wejścia/wyjścia'], ['showMedia', 'Podgląd obrazków z linków']]]] as const).map(([section, fields]) => <div key={section} className="irc-settings-section"><p className="irc-section-title">{section}</p>{section === 'Powiadomienia' && <label className="flex items-center justify-between text-sm">Powiadomienia przeglądarki<Switch checked={settings.notify} onCheckedChange={toggleNotify} /></label>}{fields.map(([key, label]) => <label key={key} className="flex items-center justify-between text-sm">{label}<Switch checked={settings[key]} onCheckedChange={(value) => updateSetting(key, value)} /></label>)}</div>)}
+        </DialogContent>
+      </Dialog>
 
       <div className={`grid min-h-[570px] ${showChats ? 'lg:grid-cols-[210px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
         {showChats && <aside className="irc-sidebar border-b lg:border-b-0 lg:border-r border-border p-3 max-h-64 lg:max-h-none overflow-y-auto">
