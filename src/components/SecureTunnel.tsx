@@ -1,5 +1,5 @@
 import { FormEvent, KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, BellOff, ChevronLeft, ChevronRight, Hash, LogOut, Menu, MessageSquare, Search, Send, Settings, Users, X } from 'lucide-react';
+import { ArrowDown, Bell, BellOff, ChevronLeft, ChevronRight, Download, Hash, LogOut, Menu, MessageSquare, Search, Send, Settings, Users, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -64,6 +64,9 @@ const SecureTunnel = () => {
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   const logRef = useRef<HTMLDivElement>(null);
+  const followLogRef = useRef(true);
+  const lastSeenLogRef = useRef(0);
+  const [newMessages, setNewMessages] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const realRef = useRef(false);
@@ -93,7 +96,32 @@ const SecureTunnel = () => {
   };
   useEffect(() => { nickRef.current = nick; }, [nick]);
   useEffect(() => { activeRef.current = activeId; }, [activeId]);
-  useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight; }, [active?.logs]);
+  const jumpToLatest = () => {
+    const log = logRef.current;
+    if (!log) return;
+    log.scrollTop = log.scrollHeight;
+    followLogRef.current = true;
+    lastSeenLogRef.current = active?.logs.at(-1)?.id ?? 0;
+    setNewMessages(0);
+  };
+  useEffect(() => { jumpToLatest(); }, [activeId, search, settings.hideEvents]);
+  useEffect(() => {
+    if (followLogRef.current) jumpToLatest();
+    else setNewMessages(active?.logs.filter((line) => line.id > lastSeenLogRef.current && !(settings.hideEvents && line.type === 'event')).length ?? 0);
+  }, [active?.logs]);
+  const exportConversation = () => {
+    if (!active?.logs.length) return;
+    const content = [`${selected.name} · ${active.label}`, new Date().toLocaleString('pl-PL'), '', ...active.logs.map((line) => {
+      const text = stripFormatting(line.text).replace(/(\b(?:IDENTIFY|LOGIN|AUTHENTICATE)\b)\s+\S+.*/gi, '$1 [ukryto]');
+      return `[${line.time}] ${line.nick ? `<${line.nick}> ` : ''}${text}`;
+    })].join('\n');
+    const url = URL.createObjectURL(new Blob([content], { type: 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `irc-${active.label.replace(/[^a-z0-9_-]/gi, '_')}-${new Date().toISOString().slice(0, 10)}.txt`;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   useEffect(() => () => { intentionalCloseRef.current = true; wsRef.current?.close(); if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current); }, []);
 
   const ensureBuffer = (label: string, kind: BufferKind) => {
@@ -321,6 +349,7 @@ const SecureTunnel = () => {
         </div>
         <div className="irc-toolbar flex flex-wrap items-center gap-1">
           <Button size="icon" variant={showSearch ? 'default' : 'ghost'} className="h-8 w-8 rounded-full" onClick={() => setShowSearch((value) => !value)} aria-label="Szukaj w rozmowie" title="Szukaj w rozmowie"><Search /></Button>
+          <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" onClick={exportConversation} disabled={!active?.logs.length} aria-label="Zapisz rozmowę" title="Zapisz rozmowę jako TXT"><Download /></Button>
           <Button size="icon" variant={settings.notify ? 'default' : 'ghost'} className="h-8 w-8 rounded-full" onClick={toggleNotify} aria-label="Powiadomienia" title="Powiadomienia o wzmiankach i privach">{settings.notify ? <Bell /> : <BellOff />}</Button>
           <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" onClick={() => setShowSettings(true)} aria-label="Ustawienia" title="Ustawienia"><Settings /></Button>
           <div className="irc-segment ml-1" aria-label="Wybór szaty graficznej">{THEMES.map((item) => <Button variant="ghost" type="button" key={item.id} onClick={() => setTheme(item.id)} aria-pressed={theme === item.id} className={theme === item.id ? 'is-active' : ''}>{item.label}</Button>)}</div>
@@ -359,7 +388,12 @@ const SecureTunnel = () => {
               {active?.kind === 'channel' && <Button size="icon" variant="ghost" onClick={() => { setShowNicks((value) => !value); if (!window.matchMedia('(min-width: 1024px)').matches) setShowChats(false); }} aria-label={showNicks ? 'Ukryj nicki' : 'Pokaż nicki'} title={showNicks ? 'Ukryj nicki' : 'Pokaż nicki'}><Users /></Button>}
             </div>
             {showSearch && <div className="flex items-center gap-2 border-b border-border px-3 py-1.5"><Search className="h-3.5 w-3.5 text-muted-foreground" /><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Szukaj w tej rozmowie…" className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none" aria-label="Szukaj w rozmowie" /><Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => { setSearch(''); setShowSearch(false); }} aria-label="Zamknij szukanie"><X /></Button></div>}
-            <div ref={logRef} className="irc-log min-h-0 flex-1 overflow-y-auto px-2 sm:px-3 py-2 font-mono text-xs" aria-live="polite">
+            <div ref={logRef} onScroll={() => {
+              const log = logRef.current;
+              if (!log) return;
+              followLogRef.current = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+              if (followLogRef.current) { lastSeenLogRef.current = active?.logs.at(-1)?.id ?? 0; setNewMessages(0); }
+            }} className="irc-log min-h-0 flex-1 overflow-y-auto px-2 sm:px-3 py-2 font-mono text-xs" aria-live="polite">
               {!active?.logs.length && <div className="irc-empty"><p className="font-bold text-foreground">{selected.name}</p><p>{status === 'idle' ? 'Brak połączenia' : 'Brak wiadomości'}</p>{status === 'idle' && <Button onClick={connect}>OPEN TUNNEL</Button>}</div>}
               {(() => { const visible = active?.logs.filter((line) => !(settings.hideEvents && line.type === 'event') && (!search || `${line.nick ?? ''} ${line.text}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()))) ?? []; return visible.map((line, index) => {
                 const highlighted = line.nick && line.nick !== nick && [nick, ...splitList(settings.highlights)].some((word) => line.text.toLocaleLowerCase().includes(word.toLocaleLowerCase()));
@@ -369,6 +403,7 @@ const SecureTunnel = () => {
                 return <div key={line.id} className={`irc-line irc-msg ${grouped ? 'is-grouped' : ''} ${highlighted ? 'is-mention' : ''} ${tone}`}>{grouped ? <time className="irc-hover-time">{line.time}</time> : <Avatar name={line.nick} size="h-8 w-8" mono={theme === 'mono'} />}<div className="min-w-0">{!grouped && <div className="flex flex-wrap items-baseline gap-x-2"><strong className="nick-label" data-tone={nickHue(line.nick) % 6}>{line.nick}</strong>{line.type === 'notice' && <span className="irc-rank">notice</span>}<time className="text-[10px] text-muted-foreground opacity-60">{line.time}</time></div>}<div className="break-words leading-relaxed"><RichText text={line.text} media={settings.showMedia} /></div></div></div>;
               }); })()}
             </div>
+            {newMessages > 0 && <div className="shrink-0 border-t border-border bg-muted/60 px-2 py-1"><Button variant="ghost" className="w-full gap-2 text-primary text-xs" onClick={jumpToLatest}><ArrowDown className="h-4 w-4" /><span>Nowe wiadomości: {newMessages}</span></Button></div>}
             <form onSubmit={onSubmit} className="irc-input shrink-0 p-2 sm:p-3 border-t border-border"><div className="irc-composer"><span className="text-primary font-mono font-bold">›</span><input ref={inputRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={onInputKeyDown} disabled={status !== 'connected'} placeholder={status === 'connected' ? (activeTarget ? `Napisz do ${activeTarget}…` : '/join #kanał') : 'Najpierw otwórz tunel'} className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground text-sm" aria-label="Wiadomość lub komenda IRC" />{input.startsWith('/') && <span className="hidden sm:inline text-[10px] text-muted-foreground">Tab → komenda</span>}<Button type="submit" size="icon" disabled={status !== 'connected' || !input.trim()} className="h-8 w-8 rounded-full" title="Wyślij" aria-label="Wyślij"><Send /></Button></div></form>
           </div>
 
