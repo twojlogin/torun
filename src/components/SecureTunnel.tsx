@@ -101,7 +101,7 @@ const SecureTunnel = () => {
     if (!log) return;
     log.scrollTop = log.scrollHeight;
     followLogRef.current = true;
-    lastSeenLogRef.current = active?.logs.at(-1)?.id ?? 0;
+    lastSeenLogRef.current = active?.logs[active.logs.length - 1]?.id ?? 0;
     setNewMessages(0);
   };
   useEffect(() => { jumpToLatest(); }, [activeId, search, settings.hideEvents]);
@@ -392,7 +392,7 @@ const SecureTunnel = () => {
               const log = logRef.current;
               if (!log) return;
               followLogRef.current = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
-              if (followLogRef.current) { lastSeenLogRef.current = active?.logs.at(-1)?.id ?? 0; setNewMessages(0); }
+              if (followLogRef.current) { lastSeenLogRef.current = active?.logs[active.logs.length - 1]?.id ?? 0; setNewMessages(0); }
             }} className="irc-log min-h-0 flex-1 overflow-y-auto px-2 sm:px-3 py-2 font-mono text-xs" aria-live="polite">
               {!active?.logs.length && <div className="irc-empty"><p className="font-bold text-foreground">{selected.name}</p><p>{status === 'idle' ? 'Brak połączenia' : 'Brak wiadomości'}</p>{status === 'idle' && <Button onClick={connect}>OPEN TUNNEL</Button>}</div>}
               {(() => { const visible = active?.logs.filter((line) => !(settings.hideEvents && line.type === 'event') && (!search || `${line.nick ?? ''} ${line.text}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()))) ?? []; return visible.map((line, index) => {
