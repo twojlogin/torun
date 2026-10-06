@@ -1,4 +1,5 @@
 # Roadmap
+- [ ] Sprawdzić i poprawić układ Matrix, Mono i PIRC na laptopie i telefonie: rozmowy, kanały i ustawienia
 - [x] Dodać jowisz.pirc.pl do bramki i listy serwerów
 - [x] Zbudować widok kanału, listę nicków i komendy mIRC
 - [x] Dodać szaty Matrix, Mono i PIRC
