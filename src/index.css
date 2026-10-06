@@ -200,6 +200,9 @@
 .irc-buffer svg, .irc-nick-row .irc-rank { flex-shrink: 0; }
 .irc-nick-row > .truncate { min-width: 0; }
 .irc-log { overscroll-behavior: contain; overflow-wrap: anywhere; }
+.irc-sys { grid-template-columns: 54px minmax(0, 1fr); }
+.irc-sys time { white-space: nowrap; }
+:root[data-theme="mono"], :root[data-theme="pirc"] { --destructive-foreground: 0 0% 100%; }
 .irc-empty { display: flex; flex-direction: column; justify-content: center; gap: 12px; }
 .irc-dialog { z-index: 70; background: hsl(var(--background)); border-radius: 8px; overscroll-behavior: contain; }
 .irc-settings-section { min-width: 0; border-radius: 8px; }

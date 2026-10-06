@@ -1,11 +1,11 @@
 # Roadmap
-- [ ] Sprawdzić i poprawić układ Matrix, Mono i PIRC na laptopie i telefonie: rozmowy, kanały i ustawienia
+- [x] Sprawdzić i poprawić układ Matrix, Mono i PIRC na laptopie i telefonie: rozmowy, kanały i ustawienia
 - [x] Dodać jowisz.pirc.pl do bramki i listy serwerów
 - [x] Zbudować widok kanału, listę nicków i komendy mIRC
 - [x] Dodać szaty Matrix, Mono i PIRC
 - [x] Wdrożyć bramkę i sprawdzić działanie
-- [ ] Dodać zwijaną belkę terminala
-- [ ] Rozbudować klienta o zakładki kanałów i rozmów prywatnych
-- [ ] Dodać nieprzeczytane, wzmianki, temat, tryby i pełniejsze zdarzenia IRC
-- [ ] Dodać menu nicków, Tab completion, historię komend i reconnect
-- [ ] Sprawdzić pełny przebieg na laptopie i telefonie
+- [x] Dodać zwijaną belkę terminala
+- [x] Rozbudować klienta o zakładki kanałów i rozmów prywatnych
+- [x] Dodać nieprzeczytane, wzmianki, temat, tryby i pełniejsze zdarzenia IRC
+- [x] Dodać menu nicków, Tab completion, historię komend i reconnect
+- [x] Sprawdzić pełny przebieg na laptopie i telefonie
