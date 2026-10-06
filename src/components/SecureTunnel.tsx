@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
-const Avatar = ({ name, size = 'h-6 w-6', mono }: { name: string; size?: string; mono?: boolean }) => { const hue = nickHue(name); return <span aria-hidden="true" className={`irc-avatar ${size}`} style={mono ? undefined : { background: `linear-gradient(135deg, hsl(${hue} 70% 45%), hsl(${(hue + 40) % 360} 75% 30%))` }}>{name.replace(/^[^a-z0-9]+/i, '').charAt(0).toUpperCase() || '?'}</span>; };
+const Avatar = ({ name, size = 'h-6 w-6' }: { name: string; size?: string; mono?: boolean }) => <span aria-hidden="true" data-tone={nickHue(name) % 6} className={`irc-avatar ${size}`}>{name.replace(/^[^a-z0-9]+/i, '').charAt(0).toUpperCase() || '?'}</span>;
 
 type Theme = 'matrix' | 'mono' | 'pirc';
 type Status = 'idle' | 'connecting' | 'connected' | 'reconnecting';
@@ -17,7 +17,7 @@ const nickHue = (name: string) => { let hash = 0; for (const char of name) hash 
 const stripFormatting = (text: string) => text.replace(/\x03\d{0,2}(,\d{1,2})?|[\x02\x0F\x16\x1D\x1F\x1E]/g, '');
 const URL_RE = /(https?:\/\/[^\s<>"]+)/g;
 const beep = () => { try { const ctx = new AudioContext(); const osc = ctx.createOscillator(); const gain = ctx.createGain(); osc.frequency.value = 880; gain.gain.value = 0.05; osc.connect(gain).connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.12); } catch { /* audio blocked */ } };
-const RichText = ({ text, media }: { text: string; media: boolean }) => <>{stripFormatting(text).split(URL_RE).map((part, index) => index % 2 === 1 ? <span key={index}><a href={part} target="_blank" rel="noopener noreferrer" className="underline text-primary break-all">{part}</a>{media && /\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(part) && <img src={part} alt="Podgląd obrazka" loading="lazy" className="mt-1 block max-h-48 max-w-xs border border-border" />}</span> : <span key={index}>{part}</span>)}</>;
+const RichText = ({ text, media }: { text: string; media: boolean }) => <>{stripFormatting(text).split(URL_RE).map((part, index) => index % 2 === 1 ? <span key={index}><a href={part} target="_blank" rel="noopener noreferrer" className="underline text-primary break-all">{part}</a>{media && /\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(part) && <img src={part} alt="Podgląd obrazka" loading="lazy" className="mt-1 block max-h-48 max-w-full border border-border" />}</span> : <span key={index}>{part}</span>)}</>;
 type ChatLog = { id: number; text: string; type: LogType; nick?: string; time: string };
 type BufferKind = 'server' | 'channel' | 'query';
 type ChatBuffer = { id: string; label: string; kind: BufferKind; logs: ChatLog[]; nicks: string[]; topic: string; modes: string; unread: number; mention: boolean };
@@ -58,8 +58,8 @@ const SecureTunnel = () => {
   const settingsRef = useRef(settings);
   const [nick, setNick] = useState(() => loadSettings().nick || `neo_${Math.floor(Math.random() * 9999)}`);
   const [input, setInput] = useState('');
-  const [showNicks, setShowNicks] = useState(true);
-  const [showChats, setShowChats] = useState(true);
+  const [showNicks, setShowNicks] = useState(() => window.matchMedia('(min-width: 1024px)').matches);
+  const [showChats, setShowChats] = useState(() => window.matchMedia('(min-width: 1024px)').matches);
   const [theme, setTheme] = useState<Theme>(() => (localStorage.getItem('matrix-theme') as Theme) || 'matrix');
   const [history, setHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -72,6 +72,13 @@ const SecureTunnel = () => {
   const intentionalCloseRef = useRef(false);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reconnectCountRef = useRef(0);
+
+  useEffect(() => {
+    const media = window.matchMedia('(min-width: 1024px)');
+    const updatePanels = () => { setShowChats(media.matches); setShowNicks(media.matches); };
+    media.addEventListener('change', updatePanels);
+    return () => media.removeEventListener('change', updatePanels);
+  }, []);
 
   const isReal = selected.network === 'IRC';
   const active = buffers.find((item) => item.id === activeId) ?? buffers[0];
@@ -116,7 +123,7 @@ const SecureTunnel = () => {
   const openBuffer = (id: string) => {
     setActiveId(id); activeRef.current = id;
     setBuffers((previous) => previous.map((buffer) => buffer.id === id ? { ...buffer, unread: 0, mention: false } : buffer));
-    inputRef.current?.focus();
+    if (!window.matchMedia('(min-width: 1024px)').matches) { setShowChats(false); setShowNicks(false); }
   };
 
   const sendRaw = (line: string, echo = true) => {
@@ -306,66 +313,67 @@ const SecureTunnel = () => {
 
   return (
     <section className="irc-shell w-full max-w-7xl mx-auto overflow-hidden" aria-label="Klient IRC">
-      <header className="irc-titlebar px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-border">
+      <header className="irc-titlebar px-3 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-2 border-b border-border">
         <div className="min-w-0 flex items-center gap-3">
           <span className={`irc-status-dot ${status === 'connected' ? 'is-on' : status === 'idle' ? 'is-off' : 'is-busy'}`} aria-hidden="true" />
-          <div className="min-w-0"><p className="font-mono text-sm font-bold tracking-wider text-foreground">SECURE TUNNEL <span className="text-muted-foreground font-normal">/ IRC</span></p>
+          <div className="min-w-0"><p className="font-mono text-sm font-bold text-foreground">SECURE TUNNEL <span className="text-muted-foreground font-normal">/ IRC</span></p>
           <div className="flex flex-wrap items-center gap-1.5 mt-0.5"><span className="irc-chip">{selected.name}</span><span className="irc-chip">{nick}</span><span className="irc-chip">{status === 'connected' ? 'online' : status === 'idle' ? 'offline' : status === 'connecting' ? 'łączenie…' : 'ponawianie…'}</span>{encStrength > 0 && <span className="irc-chip">🔒 {encStrength}%</span>}</div></div>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="irc-toolbar flex flex-wrap items-center gap-1">
           <Button size="icon" variant={showSearch ? 'default' : 'ghost'} className="h-8 w-8 rounded-full" onClick={() => setShowSearch((value) => !value)} aria-label="Szukaj w rozmowie" title="Szukaj w rozmowie"><Search /></Button>
           <Button size="icon" variant={settings.notify ? 'default' : 'ghost'} className="h-8 w-8 rounded-full" onClick={toggleNotify} aria-label="Powiadomienia" title="Powiadomienia o wzmiankach i privach">{settings.notify ? <Bell /> : <BellOff />}</Button>
           <Button size="icon" variant="ghost" className="h-8 w-8 rounded-full" onClick={() => setShowSettings(true)} aria-label="Ustawienia" title="Ustawienia"><Settings /></Button>
-          <div className="irc-segment ml-1" aria-label="Wybór szaty graficznej">{THEMES.map((item) => <button type="button" key={item.id} onClick={() => setTheme(item.id)} className={theme === item.id ? 'is-active' : ''}>{item.label}</button>)}</div>
+          <div className="irc-segment ml-1" aria-label="Wybór szaty graficznej">{THEMES.map((item) => <Button variant="ghost" type="button" key={item.id} onClick={() => setTheme(item.id)} aria-pressed={theme === item.id} className={theme === item.id ? 'is-active' : ''}>{item.label}</Button>)}</div>
         </div>
       </header>
       <Dialog open={showSettings} onOpenChange={setShowSettings}>
-        <DialogContent className="irc-dialog max-w-lg max-h-[85vh] overflow-y-auto">
-          <DialogHeader><DialogTitle className="font-mono tracking-wider">Ustawienia klienta</DialogTitle><DialogDescription>Zapisywane tylko w tej przeglądarce. Hasło NickServ trafia wyłącznie do serwera IRC.</DialogDescription></DialogHeader>
+        <DialogContent className="irc-dialog max-w-lg w-[calc(100%-2rem)] max-h-[calc(100dvh-2rem)] overflow-y-auto p-4 sm:p-6">
+          <DialogHeader className="pr-7 text-left"><DialogTitle className="font-mono tracking-wider">Ustawienia klienta</DialogTitle><DialogDescription>Zapisywane tylko w tej przeglądarce. Hasło NickServ trafia wyłącznie do serwera IRC.</DialogDescription></DialogHeader>
           {([['Konto', [['nick', 'Stały nick', 'np. arek'], ['nickserv', 'Hasło NickServ (auto-identify)', '••••••']]], ['Kanały', [['autojoin', 'Auto-join kanały', '#polska, #linux'], ['highlights', 'Słowa wyróżniające', 'arek, admin'], ['ignore', 'Ignorowani', 'spamer1, bot2']]]] as const).map(([section, fields]) => <div key={section} className="irc-settings-section"><p className="irc-section-title">{section}</p>{fields.map(([key, label, placeholder]) => <label key={key} className="flex flex-col gap-1 text-xs text-muted-foreground">{label}<input type={key === 'nickserv' ? 'password' : 'text'} value={settings[key]} placeholder={placeholder} onChange={(event) => { updateSetting(key, event.target.value); if (key === 'nick' && status === 'idle' && event.target.value) setNick(event.target.value); }} className="irc-field" /></label>)}</div>)}
-          {([['Powiadomienia', [['sound', 'Dźwięk przy wzmiance']]], ['Wygląd', [['hideEvents', 'Ukryj wejścia/wyjścia'], ['showMedia', 'Podgląd obrazków z linków']]]] as const).map(([section, fields]) => <div key={section} className="irc-settings-section"><p className="irc-section-title">{section}</p>{section === 'Powiadomienia' && <label className="flex items-center justify-between text-sm">Powiadomienia przeglądarki<Switch checked={settings.notify} onCheckedChange={toggleNotify} /></label>}{fields.map(([key, label]) => <label key={key} className="flex items-center justify-between text-sm">{label}<Switch checked={settings[key]} onCheckedChange={(value) => updateSetting(key, value)} /></label>)}</div>)}
+          {([['Powiadomienia', [['sound', 'Dźwięk przy wzmiance']]], ['Wygląd', [['hideEvents', 'Ukryj wejścia/wyjścia'], ['showMedia', 'Podgląd obrazków z linków']]]] as const).map(([section, fields]) => <div key={section} className="irc-settings-section"><p className="irc-section-title">{section}</p>{section === 'Powiadomienia' && <label className="flex items-center justify-between gap-4 text-sm">Powiadomienia przeglądarki<Switch checked={settings.notify} onCheckedChange={toggleNotify} /></label>}{fields.map(([key, label]) => <label key={key} className="flex items-center justify-between gap-4 text-sm">{label}<Switch checked={settings[key]} onCheckedChange={(value) => updateSetting(key, value)} /></label>)}</div>)}
         </DialogContent>
       </Dialog>
 
-      <div className={`grid min-h-[570px] ${showChats ? 'lg:grid-cols-[210px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
-        {showChats && <aside className="irc-sidebar border-b lg:border-b-0 lg:border-r border-border p-3 max-h-64 lg:max-h-none overflow-y-auto">
+      <div className={`irc-workspace relative grid min-h-0 ${showChats ? 'lg:grid-cols-[210px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
+        {(showChats || (showNicks && active?.kind === 'channel')) && <Button variant="ghost" className="irc-panel-backdrop absolute inset-0 z-10 h-full w-full rounded-none lg:hidden" aria-label="Zamknij panel" onClick={() => { setShowChats(false); setShowNicks(false); }} />}
+        {showChats && <aside aria-label="Sieć i rozmowy" className="irc-sidebar absolute inset-y-0 left-0 z-20 w-[min(280px,90%)] lg:static lg:z-auto lg:w-auto border-r border-border p-3 overflow-y-auto">
           <div className="flex items-center justify-between mb-2"><p className="text-[10px] font-bold text-muted-foreground">SIEĆ I ROZMOWY</p><Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => setShowChats(false)} aria-label="Ukryj rozmowy" title="Ukryj rozmowy"><ChevronLeft /></Button></div>
           <label className="text-[10px] text-muted-foreground">SERWER</label>
           <select value={selected.id} onChange={(event) => { const next = SERVERS.find((server) => server.id === event.target.value); if (next && status === 'idle') setSelected(next); }} disabled={status !== 'idle'} className="irc-field mt-1 mb-3 w-full text-xs" aria-label="Serwer IRC">{SERVERS.map((server) => <option key={server.id} value={server.id}>{server.name} · {server.ping}ms</option>)}</select>
           <div className="space-y-0.5">
-            {buffers.map((buffer) => <button type="button" key={buffer.id} onClick={() => openBuffer(buffer.id)} className={`irc-buffer ${activeId === buffer.id ? 'is-active' : ''} ${buffer.mention ? 'is-mention' : ''}`}>
-              {buffer.kind === 'channel' ? <Hash className="h-3.5 w-3.5" /> : buffer.kind === 'query' ? <MessageSquare className="h-3.5 w-3.5" /> : <Menu className="h-3.5 w-3.5" />}<span className="truncate">{buffer.label}</span>
+            {buffers.map((buffer) => <Button variant="ghost" type="button" key={buffer.id} onClick={() => openBuffer(buffer.id)} className={`irc-buffer ${activeId === buffer.id ? 'is-active' : ''} ${buffer.mention ? 'is-mention' : ''}`}>
+              {buffer.kind === 'channel' ? <Hash className="h-3.5 w-3.5" /> : buffer.kind === 'query' ? <MessageSquare className="h-3.5 w-3.5" /> : <Menu className="h-3.5 w-3.5" />}<span className="min-w-0 truncate">{buffer.label}</span>
               {buffer.unread > 0 && <span className={`irc-badge ml-auto ${buffer.mention ? 'is-mention' : ''}`}>{buffer.unread}</span>}
-            </button>)}
+            </Button>)}
           </div>
           <div className="mt-3">{status === 'idle' ? <Button onClick={connect} className="w-full font-mono">OPEN TUNNEL</Button> : <Button onClick={disconnect} variant="destructive" className="w-full font-mono"><LogOut />ROZŁĄCZ</Button>}</div>
           <div className="mt-3 text-[10px] text-muted-foreground font-mono leading-5">nick: <span className="text-foreground">{nick}</span><br />szyfrowanie: {encStrength}%<br />stan: {status}</div>
         </aside>}
 
-        <div className={`grid min-w-0 ${showNicks && active?.kind === 'channel' ? 'md:grid-cols-[minmax(0,1fr)_190px]' : 'grid-cols-1'}`}>
-          <div className="flex min-w-0 flex-col bg-card/70">
+        <div className={`grid min-w-0 ${showNicks && active?.kind === 'channel' ? 'lg:grid-cols-[minmax(0,1fr)_170px] xl:grid-cols-[minmax(0,1fr)_190px]' : 'grid-cols-1'}`}>
+          <div className="flex min-h-0 min-w-0 flex-col bg-card/70">
             <div className="min-h-12 px-2 sm:px-3 flex items-center gap-2 border-b border-border bg-muted/60">
-              {!showChats && <Button size="icon" variant="ghost" onClick={() => setShowChats(true)} aria-label="Pokaż rozmowy" title="Pokaż rozmowy"><ChevronRight /></Button>}
+              <Button size="icon" variant="ghost" className={showChats ? 'lg:hidden shrink-0' : 'shrink-0'} onClick={() => { setShowChats((value) => !value); setShowNicks(false); }} aria-label="Pokaż rozmowy" title="Pokaż rozmowy"><Menu /></Button>
               <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><strong className="text-sm truncate">{active?.label || 'Status'}</strong>{active?.modes && <span className="text-[10px] text-muted-foreground">{active.modes}</span>}</div><p className="text-[10px] text-muted-foreground truncate">{active?.topic || (active?.kind === 'server' ? 'Komunikaty sieci' : 'Brak tematu kanału')}</p></div>
               {active?.kind !== 'server' && <Button size="icon" variant="ghost" onClick={closeActive} aria-label="Zamknij rozmowę" title="Zamknij rozmowę"><X /></Button>}
-              {active?.kind === 'channel' && <Button size="icon" variant="ghost" onClick={() => setShowNicks((value) => !value)} aria-label={showNicks ? 'Ukryj nicki' : 'Pokaż nicki'} title={showNicks ? 'Ukryj nicki' : 'Pokaż nicki'}><Users /></Button>}
+              {active?.kind === 'channel' && <Button size="icon" variant="ghost" onClick={() => { setShowNicks((value) => !value); if (!window.matchMedia('(min-width: 1024px)').matches) setShowChats(false); }} aria-label={showNicks ? 'Ukryj nicki' : 'Pokaż nicki'} title={showNicks ? 'Ukryj nicki' : 'Pokaż nicki'}><Users /></Button>}
             </div>
-            {showSearch && <div className="flex items-center gap-2 border-b border-border px-3 py-1.5"><Search className="h-3.5 w-3.5 text-muted-foreground" /><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Szukaj w tej rozmowie…" className="flex-1 bg-transparent text-xs text-foreground outline-none" aria-label="Szukaj w rozmowie" /><Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => { setSearch(''); setShowSearch(false); }} aria-label="Zamknij szukanie"><X /></Button></div>}
-            <div ref={logRef} className={`irc-log ${showSearch ? 'h-[426px]' : 'h-[462px]'} overflow-y-auto px-3 py-2 font-mono text-xs`} aria-live="polite">
-              {!active?.logs.length && <div className="irc-empty"><p className="font-bold text-foreground">Witaj w tunelu</p><p>Otwórz tunel i wpisz <kbd>/join #kanał</kbd></p><p><kbd>Tab</kbd> uzupełnia nicki · <kbd>↑↓</kbd> historia · <kbd>⚙</kbd> ustawienia</p></div>}
+            {showSearch && <div className="flex items-center gap-2 border-b border-border px-3 py-1.5"><Search className="h-3.5 w-3.5 text-muted-foreground" /><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Szukaj w tej rozmowie…" className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none" aria-label="Szukaj w rozmowie" /><Button size="icon" variant="ghost" className="h-6 w-6" onClick={() => { setSearch(''); setShowSearch(false); }} aria-label="Zamknij szukanie"><X /></Button></div>}
+            <div ref={logRef} className="irc-log min-h-0 flex-1 overflow-y-auto px-2 sm:px-3 py-2 font-mono text-xs" aria-live="polite">
+              {!active?.logs.length && <div className="irc-empty"><p className="font-bold text-foreground">{selected.name}</p><p>{status === 'idle' ? 'Brak połączenia' : 'Brak wiadomości'}</p>{status === 'idle' && <Button onClick={connect}>OPEN TUNNEL</Button>}</div>}
               {(() => { const visible = active?.logs.filter((line) => !(settings.hideEvents && line.type === 'event') && (!search || `${line.nick ?? ''} ${line.text}`.toLocaleLowerCase().includes(search.toLocaleLowerCase()))) ?? []; return visible.map((line, index) => {
                 const highlighted = line.nick && line.nick !== nick && [nick, ...splitList(settings.highlights)].some((word) => line.text.toLocaleLowerCase().includes(word.toLocaleLowerCase()));
                 const grouped = Boolean(line.nick) && visible[index - 1]?.nick === line.nick && visible[index - 1]?.type === line.type;
                 const tone = line.type === 'ok' ? 'text-primary' : line.type === 'warn' ? 'text-warning' : line.type === 'err' ? 'text-destructive' : line.type === 'notice' ? 'text-accent-foreground' : line.type === 'msg' ? 'text-foreground' : 'text-muted-foreground';
                 if (!line.nick) return <div key={line.id} className={`irc-line irc-sys ${tone} ${line.type === 'event' ? 'opacity-70' : ''}`}><time>{line.time}</time><span className="min-w-0 break-words">{line.type === 'action' && <span className="text-primary">✦ </span>}<RichText text={line.text} media={settings.showMedia} /></span></div>;
-                return <div key={line.id} className={`irc-line irc-msg ${grouped ? 'is-grouped' : ''} ${highlighted ? 'is-mention' : ''} ${tone}`}>{grouped ? <time className="irc-hover-time">{line.time}</time> : <Avatar name={line.nick} size="h-8 w-8" mono={theme === 'mono'} />}<div className="min-w-0">{!grouped && <div className="flex items-baseline gap-2"><strong className="nick-label" style={theme === 'mono' ? undefined : { color: `hsl(${nickHue(line.nick)} 75% 60%)` }}>{line.nick}</strong>{line.type === 'notice' && <span className="irc-rank">notice</span>}<time className="text-[10px] text-muted-foreground opacity-60">{line.time}</time></div>}<div className="break-words leading-relaxed"><RichText text={line.text} media={settings.showMedia} /></div></div></div>;
+                return <div key={line.id} className={`irc-line irc-msg ${grouped ? 'is-grouped' : ''} ${highlighted ? 'is-mention' : ''} ${tone}`}>{grouped ? <time className="irc-hover-time">{line.time}</time> : <Avatar name={line.nick} size="h-8 w-8" mono={theme === 'mono'} />}<div className="min-w-0">{!grouped && <div className="flex flex-wrap items-baseline gap-x-2"><strong className="nick-label" data-tone={nickHue(line.nick) % 6}>{line.nick}</strong>{line.type === 'notice' && <span className="irc-rank">notice</span>}<time className="text-[10px] text-muted-foreground opacity-60">{line.time}</time></div>}<div className="break-words leading-relaxed"><RichText text={line.text} media={settings.showMedia} /></div></div></div>;
               }); })()}
             </div>
-            <form onSubmit={onSubmit} className="irc-input p-3 border-t border-border"><div className="irc-composer"><span className="text-primary font-mono font-bold">›</span><input ref={inputRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={onInputKeyDown} disabled={status !== 'connected'} placeholder={status === 'connected' ? (activeTarget ? `Napisz do ${activeTarget}…` : '/join #kanał') : 'Najpierw otwórz tunel'} className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground text-sm" aria-label="Wiadomość lub komenda IRC" />{input.startsWith('/') && <span className="hidden sm:inline text-[10px] text-muted-foreground">Tab → komenda</span>}<Button type="submit" size="icon" disabled={status !== 'connected' || !input.trim()} className="h-8 w-8 rounded-full" title="Wyślij" aria-label="Wyślij"><Send /></Button></div></form>
+            <form onSubmit={onSubmit} className="irc-input shrink-0 p-2 sm:p-3 border-t border-border"><div className="irc-composer"><span className="text-primary font-mono font-bold">›</span><input ref={inputRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={onInputKeyDown} disabled={status !== 'connected'} placeholder={status === 'connected' ? (activeTarget ? `Napisz do ${activeTarget}…` : '/join #kanał') : 'Najpierw otwórz tunel'} className="min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground text-sm" aria-label="Wiadomość lub komenda IRC" />{input.startsWith('/') && <span className="hidden sm:inline text-[10px] text-muted-foreground">Tab → komenda</span>}<Button type="submit" size="icon" disabled={status !== 'connected' || !input.trim()} className="h-8 w-8 rounded-full" title="Wyślij" aria-label="Wyślij"><Send /></Button></div></form>
           </div>
 
-          {showNicks && active?.kind === 'channel' && <aside className="nick-panel irc-log border-t md:border-t-0 md:border-l border-border max-h-52 md:max-h-none overflow-y-auto"><div className="h-10 px-3 flex items-center gap-2 border-b border-border text-[10px] font-bold tracking-widest text-muted-foreground"><Users className="h-3.5 w-3.5" /> OSOBY <span className="irc-badge ml-auto">{sortedNicks.length}</span></div><div className="p-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-1 gap-0.5">{sortedNicks.length ? sortedNicks.map((name) => {
-            const clean = stripRank(name); const r = name.match(/^[@+%&~]/)?.[0]; return <DropdownMenu key={name}><DropdownMenuTrigger asChild><button type="button" className="irc-nick-row"><Avatar name={clean} mono={theme === 'mono'} /><span className="truncate">{clean}</span>{r && <span className={`irc-rank ${r === '+' ? 'is-voice' : ''}`}>{r === '+' ? 'voice' : 'op'}</span>}</button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuLabel>{clean}</DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem onSelect={() => openBuffer(ensureBuffer(clean, 'query'))}>Rozmowa prywatna</DropdownMenuItem><DropdownMenuItem onSelect={() => sendRaw(`WHOIS ${clean}`)}>WHOIS</DropdownMenuItem><DropdownMenuItem onSelect={() => { setInput(`${clean}: `); inputRef.current?.focus(); }}>Wstaw wzmiankę</DropdownMenuItem></DropdownMenuContent></DropdownMenu>;
+          {showNicks && active?.kind === 'channel' && <aside aria-label="Osoby na kanale" className="nick-panel irc-log absolute inset-y-0 right-0 z-20 w-[min(280px,90%)] lg:static lg:z-auto lg:w-auto border-l border-border overflow-y-auto"><div className="h-10 px-3 flex items-center gap-2 border-b border-border text-[10px] font-bold tracking-widest text-muted-foreground"><Users className="h-3.5 w-3.5" /> OSOBY <span className="irc-badge ml-auto">{sortedNicks.length}</span><Button variant="ghost" size="icon" className="lg:hidden h-8 w-8" aria-label="Zamknij listę osób" onClick={() => setShowNicks(false)}><X /></Button></div><div className="p-2 grid grid-cols-1 gap-0.5">{sortedNicks.length ? sortedNicks.map((name) => {
+            const clean = stripRank(name); const r = name.match(/^[@+%&~]/)?.[0]; return <DropdownMenu key={name}><DropdownMenuTrigger asChild><Button variant="ghost" type="button" className="irc-nick-row"><Avatar name={clean} mono={theme === 'mono'} /><span className="truncate">{clean}</span>{r && <span className={`irc-rank ${r === '+' ? 'is-voice' : ''}`}>{r === '+' ? 'voice' : 'op'}</span>}</Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuLabel>{clean}</DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuItem onSelect={() => openBuffer(ensureBuffer(clean, 'query'))}>Rozmowa prywatna</DropdownMenuItem><DropdownMenuItem onSelect={() => sendRaw(`WHOIS ${clean}`)}>WHOIS</DropdownMenuItem><DropdownMenuItem onSelect={() => { setInput(`${clean}: `); inputRef.current?.focus(); }}>Wstaw wzmiankę</DropdownMenuItem></DropdownMenuContent></DropdownMenu>;
           }) : <p className="col-span-full px-2 py-3 text-xs text-muted-foreground">Lista pojawi się po wejściu na kanał.</p>}</div></aside>}
         </div>
       </div>
