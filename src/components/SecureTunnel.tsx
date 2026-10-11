@@ -125,6 +125,8 @@ const SecureTunnel = () => {
   };
   useEffect(() => () => { intentionalCloseRef.current = true; wsRef.current?.close(); if (reconnectTimerRef.current) clearTimeout(reconnectTimerRef.current); }, []);
 
+  const buffersRef = useRef(buffers);
+  useEffect(() => { buffersRef.current = buffers; }, [buffers]);
   const ensureBuffer = (label: string, kind: BufferKind) => {
     const id = kind === 'server' ? 'server' : normalizeId(label);
     setBuffers((previous) => previous.some((item) => item.id === id) ? previous : [...previous, { id, label, kind, logs: [], nicks: [], topic: '', modes: '', unread: 0, mention: false }]);
@@ -210,7 +212,7 @@ const SecureTunnel = () => {
     if (command === 'PRIVMSG' || command === 'NOTICE') {
       const target = params[0] || 'server';
       if (splitList(settingsRef.current.ignore).some((entry) => entry.toLocaleLowerCase() === source.toLocaleLowerCase())) return;
-      const destination = messageTarget(command, source, target, nickRef.current, new Set(buffers.filter((buffer) => buffer.kind === 'query').map((buffer) => buffer.id)));
+      const destination = messageTarget(command, source, target, nickRef.current, new Set(buffersRef.current.filter((buffer) => buffer.kind === 'query').map((buffer) => buffer.id)));
       const id = ensureBuffer(destination.label, destination.kind);
       const marker = String.fromCharCode(1);
       const action = trailing.startsWith(`${marker}ACTION `) && trailing.endsWith(marker) ? trailing.slice(8, -1) : null;
