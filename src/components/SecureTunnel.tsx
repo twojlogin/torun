@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
+import { messageTarget } from '@/lib/irc-message-target';
 const Avatar = ({ name, size = 'h-6 w-6' }: { name: string; size?: string; mono?: boolean }) => <span aria-hidden="true" data-tone={nickHue(name) % 6} className={`irc-avatar ${size}`}>{name.replace(/^[^a-z0-9]+/i, '').charAt(0).toUpperCase() || '?'}</span>;
 
 type Theme = 'matrix' | 'mono' | 'pirc';
@@ -209,9 +210,8 @@ const SecureTunnel = () => {
     if (command === 'PRIVMSG' || command === 'NOTICE') {
       const target = params[0] || 'server';
       if (splitList(settingsRef.current.ignore).some((entry) => entry.toLocaleLowerCase() === source.toLocaleLowerCase())) return;
-      const isPrivate = normalizeId(target) === normalizeId(nickRef.current);
-      const bufferLabel = isPrivate ? source : target;
-      const id = ensureBuffer(bufferLabel, isPrivate ? 'query' : 'channel');
+      const destination = messageTarget(command, source, target, nickRef.current, new Set(buffers.filter((buffer) => buffer.kind === 'query').map((buffer) => buffer.id)));
+      const id = ensureBuffer(destination.label, destination.kind);
       const marker = String.fromCharCode(1);
       const action = trailing.startsWith(`${marker}ACTION `) && trailing.endsWith(marker) ? trailing.slice(8, -1) : null;
       push(id, action ? `${source} ${action}` : trailing, command === 'NOTICE' ? 'notice' : action ? 'action' : 'msg', action ? undefined : source);
@@ -379,7 +379,7 @@ const SecureTunnel = () => {
           <div className="mt-3 text-[10px] text-muted-foreground font-mono leading-5">nick: <span className="text-foreground">{nick}</span><br />szyfrowanie: {encStrength}%<br />stan: {status}</div>
         </aside>}
 
-        <div className={`grid min-w-0 ${showNicks && active?.kind === 'channel' ? 'lg:grid-cols-[minmax(0,1fr)_170px] xl:grid-cols-[minmax(0,1fr)_190px]' : 'grid-cols-1'}`}>
+        <div className={`grid min-h-0 min-w-0 ${showNicks && active?.kind === 'channel' ? 'lg:grid-cols-[minmax(0,1fr)_170px] xl:grid-cols-[minmax(0,1fr)_190px]' : 'grid-cols-1'}`}>
           <div className="flex min-h-0 min-w-0 flex-col bg-card/70">
             <div className="min-h-12 px-2 sm:px-3 flex items-center gap-2 border-b border-border bg-muted/60">
               <Button size="icon" variant="ghost" className={showChats ? 'lg:hidden shrink-0' : 'shrink-0'} onClick={() => { setShowChats((value) => !value); setShowNicks(false); }} aria-label="Pokaż rozmowy" title="Pokaż rozmowy"><Menu /></Button>

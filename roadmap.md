@@ -1,4 +1,5 @@
 # Roadmap
+- [ ] Przywrócić przewijanie paneli i zatrzymać automatyczne okna usług IRC
 - [ ] Dodać i sprawdzić eksport rozmowy oraz powrót do nowych wiadomości bez przerywania czytania
 - [x] Sprawdzić i poprawić układ Matrix, Mono i PIRC na laptopie i telefonie: rozmowy, kanały i ustawienia
 - [x] Dodać jowisz.pirc.pl do bramki i listy serwerów

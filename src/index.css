@@ -190,7 +190,7 @@
 .irc-avatar { background: hsl(var(--nick-color) / .18); color: hsl(var(--nick-color)); }
 :root[data-theme="mono"] .nick-label, :root[data-theme="mono"] .irc-avatar { color: hsl(var(--foreground)); }
 :root[data-theme="mono"] .irc-avatar { background: hsl(var(--muted)); }
-.irc-workspace { height: clamp(380px, 66dvh, 760px); }
+.irc-workspace { height: clamp(380px, 66dvh, 760px); grid-template-rows: minmax(0, 1fr); }
 .irc-toolbar { min-width: 0; }
 .irc-segment button { height: 32px; letter-spacing: 0; }
 .irc-chip { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -200,6 +200,11 @@
 .irc-buffer svg, .irc-nick-row .irc-rank { flex-shrink: 0; }
 .irc-nick-row > .truncate { min-width: 0; }
 .irc-log { overscroll-behavior: contain; overflow-wrap: anywhere; }
+.irc-log, .irc-sidebar { scrollbar-gutter: stable; scrollbar-width: auto; scrollbar-color: hsl(var(--primary) / .65) hsl(var(--muted)); }
+.irc-log::-webkit-scrollbar, .irc-sidebar::-webkit-scrollbar { width: 10px; }
+.irc-log::-webkit-scrollbar-track, .irc-sidebar::-webkit-scrollbar-track { background: hsl(var(--muted)); }
+.irc-log::-webkit-scrollbar-thumb, .irc-sidebar::-webkit-scrollbar-thumb { background: hsl(var(--primary) / .65); border: 2px solid hsl(var(--muted)); border-radius: 6px; }
+.irc-sidebar, .nick-panel { min-height: 0; }
 .irc-sys { grid-template-columns: 54px minmax(0, 1fr); }
 .irc-sys time { white-space: nowrap; }
 :root[data-theme="mono"], :root[data-theme="pirc"] { --destructive-foreground: 0 0% 100%; }
