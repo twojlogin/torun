@@ -17,6 +17,28 @@ const ALLOWED_HOSTS: Record<string, number[]> = {
 
 const TLS_PORTS = new Set([6697]);
 
+// Outbound abuse protection: only interactive-client commands, one target per
+// message, bounded length, and a per-connection rate limit.
+const ALLOWED_COMMANDS = new Set([
+  "PRIVMSG", "NOTICE", "JOIN", "PART", "NICK", "TOPIC", "MODE", "KICK", "INVITE",
+  "AWAY", "NAMES", "LIST", "WHOIS", "WHO", "WHOWAS", "QUIT", "PONG", "PING",
+  "ISON", "USERHOST", "MOTD", "VERSION", "TIME", "CAP",
+]);
+const SINGLE_TARGET = new Set(["PRIVMSG", "NOTICE", "KICK", "INVITE"]);
+const MAX_LINE = 450;
+const MAX_JOIN_TARGETS = 5;
+
+function validateRawLine(raw: string): string | null {
+  const line = raw.replace(/[\r\n\0]/g, "").trim();
+  if (!line || line.length > MAX_LINE) return null;
+  const [cmdRaw, target = ""] = line.split(" ", 2);
+  const cmd = cmdRaw.toUpperCase();
+  if (!ALLOWED_COMMANDS.has(cmd)) return null;
+  if (SINGLE_TARGET.has(cmd) && (!target || target.includes(","))) return null;
+  if ((cmd === "JOIN" || cmd === "PART") && target.split(",").length > MAX_JOIN_TARGETS) return null;
+  return cmd + line.slice(cmdRaw.length);
+}
+
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -32,6 +54,17 @@ Deno.serve(async (req) => {
   const { socket: ws, response } = Deno.upgradeWebSocket(req);
   let conn: Deno.TcpConn | Deno.TlsConn | null = null;
   let closed = false;
+  // token bucket: burst 5, refill 1 line/second
+  let tokens = 5;
+  let lastRefill = Date.now();
+  const takeToken = () => {
+    const now = Date.now();
+    tokens = Math.min(5, tokens + (now - lastRefill) / 1000);
+    lastRefill = now;
+    if (tokens < 1) return false;
+    tokens -= 1;
+    return true;
+  };
 
   const send = (obj: unknown) => {
     try { ws.send(JSON.stringify(obj)); } catch { /* socket gone */ }
@@ -55,7 +88,16 @@ Deno.serve(async (req) => {
     try { msg = JSON.parse(String(ev.data)); } catch { return; }
 
     if (msg.type === "raw" && msg.line && conn) {
-      try { await writeIrc(msg.line); } catch { cleanup(); }
+      const line = validateRawLine(String(msg.line));
+      if (!line) {
+        send({ type: "status", status: "rejected", detail: "command not allowed by gateway" });
+        return;
+      }
+      if (!takeToken()) {
+        send({ type: "status", status: "rejected", detail: "rate limit: slow down" });
+        return;
+      }
+      try { await writeIrc(line); } catch { cleanup(); }
       return;
     }
 
