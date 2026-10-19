@@ -11,14 +11,20 @@ type Theme = 'matrix' | 'mono' | 'pirc';
 type Status = 'idle' | 'connecting' | 'connected' | 'reconnecting';
 type LogType = 'info' | 'ok' | 'warn' | 'err' | 'msg' | 'notice' | 'action' | 'event';
 type ProSettings = { nick: string; nickserv: string; autojoin: string; highlights: string; ignore: string; notify: boolean; sound: boolean; hideEvents: boolean; showMedia: boolean };
-const DEFAULT_SETTINGS: ProSettings = { nick: '', nickserv: '', autojoin: '', highlights: '', ignore: '', notify: false, sound: true, hideEvents: false, showMedia: true };
+const DEFAULT_SETTINGS: ProSettings = { nick: '', nickserv: '', autojoin: '', highlights: '', ignore: '', notify: false, sound: true, hideEvents: false, showMedia: false };
 const loadSettings = (): ProSettings => { try { return { ...DEFAULT_SETTINGS, ...JSON.parse(localStorage.getItem('irc-pro-settings') || '{}') }; } catch { return DEFAULT_SETTINGS; } };
 const splitList = (value: string) => value.split(/[,\s]+/).map((item) => item.trim()).filter(Boolean);
 const nickHue = (name: string) => { let hash = 0; for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) % 360; return hash; };
 const stripFormatting = (text: string) => text.replace(/\x03\d{0,2}(,\d{1,2})?|[\x02\x0F\x16\x1D\x1F\x1E]/g, '');
 const URL_RE = /(https?:\/\/[^\s<>"]+)/g;
 const beep = () => { try { const ctx = new AudioContext(); const osc = ctx.createOscillator(); const gain = ctx.createGain(); osc.frequency.value = 880; gain.gain.value = 0.05; osc.connect(gain).connect(ctx.destination); osc.start(); osc.stop(ctx.currentTime + 0.12); } catch { /* audio blocked */ } };
-const RichText = ({ text, media }: { text: string; media: boolean }) => <>{stripFormatting(text).split(URL_RE).map((part, index) => index % 2 === 1 ? <span key={index}><a href={part} target="_blank" rel="noopener noreferrer" className="underline text-primary break-all">{part}</a>{media && /\.(png|jpe?g|gif|webp)(\?.*)?$/i.test(part) && <img src={part} alt="Podgląd obrazka" loading="lazy" className="mt-1 block max-h-48 max-w-full border border-border" />}</span> : <span key={index}>{part}</span>)}</>;
+const IMAGE_RE = /\.(png|jpe?g|gif|webp)(\?.*)?$/i;
+const SafeImage = ({ url }: { url: string }) => {
+  const [open, setOpen] = useState(false);
+  if (!open) return <button type="button" onClick={() => setOpen(true)} className="mt-1 block text-[10px] font-mono text-muted-foreground border border-border rounded px-2 py-1 hover:text-foreground" title="Obrazek pobierze się z zewnętrznego serwera, który pozna wtedy adres IP tego urządzenia">🖼 pokaż obrazek (uważaj: ujawnia Twoje IP serwerowi obrazka)</button>;
+  return <img src={url} alt="Podgląd obrazka" loading="lazy" referrerPolicy="no-referrer" className="mt-1 block max-h-48 max-w-full border border-border" />;
+};
+const RichText = ({ text, media }: { text: string; media: boolean }) => <>{stripFormatting(text).split(URL_RE).map((part, index) => index % 2 === 1 ? <span key={index}><a href={part} target="_blank" rel="noopener noreferrer" className="underline text-primary break-all">{part}</a>{media && IMAGE_RE.test(part) && <SafeImage url={part} />}</span> : <span key={index}>{part}</span>)}</>;
 type ChatLog = { id: number; text: string; type: LogType; nick?: string; time: string };
 type BufferKind = 'server' | 'channel' | 'query';
 type ChatBuffer = { id: string; label: string; kind: BufferKind; logs: ChatLog[]; nicks: string[]; topic: string; modes: string; unread: number; mention: boolean };
@@ -347,7 +353,7 @@ const SecureTunnel = () => {
         <div className="min-w-0 flex items-center gap-3">
           <span className={`irc-status-dot ${status === 'connected' ? 'is-on' : status === 'idle' ? 'is-off' : 'is-busy'}`} aria-hidden="true" />
           <div className="min-w-0"><p className="font-mono text-sm font-bold text-foreground">SECURE TUNNEL <span className="text-muted-foreground font-normal">/ IRC</span></p>
-          <div className="flex flex-wrap items-center gap-1.5 mt-0.5"><span className="irc-chip">{selected.name}</span><span className="irc-chip">{nick}</span><span className="irc-chip">{status === 'connected' ? 'online' : status === 'idle' ? 'offline' : status === 'connecting' ? 'łączenie…' : 'ponawianie…'}</span>{encStrength > 0 && <span className="irc-chip">🔒 {encStrength}%</span>}</div></div>
+          <div className="flex flex-wrap items-center gap-1.5 mt-0.5"><span className="irc-chip">{selected.name}</span><span className="irc-chip">{nick}</span><span className="irc-chip">{status === 'connected' ? 'online' : status === 'idle' ? 'offline' : status === 'connecting' ? 'łączenie…' : 'ponawianie…'}</span>{selected.network === 'IRC' && <span className="irc-chip" title="Serwer IRC widzi adres IP bramki w chmurze, nie Twój domowy adres">🛡 IP ukryte za bramką</span>}{encStrength > 0 && <span className="irc-chip">🔒 {encStrength}%</span>}</div></div>
         </div>
         <div className="irc-toolbar flex flex-wrap items-center gap-1">
           <Button size="icon" variant={showSearch ? 'default' : 'ghost'} className="h-8 w-8 rounded-full" onClick={() => setShowSearch((value) => !value)} aria-label="Szukaj w rozmowie" title="Szukaj w rozmowie"><Search /></Button>
