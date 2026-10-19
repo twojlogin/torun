@@ -55,6 +55,7 @@ const now = () => new Date().toLocaleTimeString([], { hour: '2-digit', minute: '
 let logId = 0;
 
 const SecureTunnel = () => {
+  const navigate = useNavigate();
   const [selected, setSelected] = useState<Server>(SERVERS[0]);
   const [status, setStatus] = useState<Status>('idle');
   const [buffers, setBuffers] = useState<ChatBuffer[]>([serverBuffer()]);

@@ -1,3 +1,4 @@
+import { createClient } from "npm:@supabase/supabase-js@2";
 // IRC tunnel gateway: browser <-> WebSocket <-> raw TCP/TLS to a real IRC server.
 // Protocol:
 //   client -> { type: "init", host, port, nick, channel? }
@@ -67,6 +68,13 @@ Deno.serve(async (req) => {
   if (!isAllowedOrigin(req.headers.get("origin"))) {
     return new Response("Forbidden origin", { status: 403, headers: cors });
   }
+
+  // Browsers cannot set headers on WebSocket, so the access token comes via query.
+  const token = new URL(req.url).searchParams.get("token") ?? "";
+  if (!token) return new Response("Unauthorized", { status: 401, headers: cors });
+  const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_ANON_KEY")!);
+  const { data: claims, error: authErr } = await sb.auth.getClaims(token);
+  if (authErr || !claims?.claims?.sub) return new Response("Unauthorized", { status: 401, headers: cors });
 
   const { socket: ws, response } = Deno.upgradeWebSocket(req);
   let conn: Deno.TcpConn | Deno.TlsConn | null = null;
