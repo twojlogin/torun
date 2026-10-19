@@ -17,6 +17,19 @@ const ALLOWED_HOSTS: Record<string, number[]> = {
 
 const TLS_PORTS = new Set([6697]);
 
+// Only this app's own pages (published, preview, local dev) may open the gateway.
+const PROJECT_ID = "1728f3ec-8dc1-4e94-a224-fbb787696422";
+function isAllowedOrigin(origin: string | null): boolean {
+  if (!origin) return false;
+  let url: URL;
+  try { url = new URL(origin); } catch { return false; }
+  const h = url.hostname.toLowerCase();
+  if (h === "torun.lovable.app") return url.protocol === "https:";
+  if (h === "localhost" || h === "127.0.0.1") return true;
+  if (url.protocol !== "https:") return false;
+  return (h.endsWith(".lovable.app") || h.endsWith(".lovableproject.com")) && h.includes(PROJECT_ID);
+}
+
 // Outbound abuse protection: only interactive-client commands, one target per
 // message, bounded length, and a per-connection rate limit.
 const ALLOWED_COMMANDS = new Set([
@@ -49,6 +62,10 @@ Deno.serve(async (req) => {
 
   if (req.headers.get("upgrade")?.toLowerCase() !== "websocket") {
     return new Response("IRC tunnel gateway — connect via WebSocket", { status: 200, headers: cors });
+  }
+
+  if (!isAllowedOrigin(req.headers.get("origin"))) {
+    return new Response("Forbidden origin", { status: 403, headers: cors });
   }
 
   const { socket: ws, response } = Deno.upgradeWebSocket(req);
