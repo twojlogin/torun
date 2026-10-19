@@ -5,6 +5,8 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel,
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { messageTarget } from '@/lib/irc-message-target';
+import { useNavigate } from 'react-router-dom';
+import { supabase } from '@/integrations/supabase/client';
 const Avatar = ({ name, size = 'h-6 w-6' }: { name: string; size?: string; mono?: boolean }) => <span aria-hidden="true" data-tone={nickHue(name) % 6} className={`irc-avatar ${size}`}>{name.replace(/^[^a-z0-9]+/i, '').charAt(0).toUpperCase() || '?'}</span>;
 
 type Theme = 'matrix' | 'mono' | 'pirc';
@@ -255,9 +257,11 @@ const SecureTunnel = () => {
     else if (/^\d{3}$/.test(command)) push('server', trailing || rest, 'info');
   };
 
-  const connectReal = () => {
+  const connectReal = async () => {
     intentionalCloseRef.current = false;
-    const wsUrl = `${import.meta.env.VITE_SUPABASE_URL.replace(/^http/, 'ws')}/functions/v1/irc-tunnel`;
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) { setStatus('idle'); push('server', '*** Zaloguj się, aby użyć bramki IRC.', 'err'); navigate('/auth'); return; }
+    const wsUrl = `${import.meta.env.VITE_SUPABASE_URL.replace(/^http/, 'ws')}/functions/v1/irc-tunnel?token=${encodeURIComponent(session.access_token)}`;
     const ws = new WebSocket(wsUrl); wsRef.current = ws; realRef.current = true;
     ws.onopen = () => ws.send(JSON.stringify({ type: 'init', host: selected.host, port: selected.port, nick: nickRef.current }));
     ws.onmessage = (event) => { try { const message = JSON.parse(String(event.data)); if (message.type === 'status') { if (message.status === 'error') { push('server', `*** ${message.detail}`, 'err'); return; } push('server', `> ${message.status}: ${message.detail ?? ''}`, 'ok'); if (message.status === 'linked') { reconnectCountRef.current = 0; setStatus('connected'); push('server', 'Połączono. Wpisz /join #kanał.', 'ok'); } } else if (message.type === 'irc') parseIrc(message.line); } catch { push('server', '*** nieczytelna odpowiedź bramki', 'err'); } };
