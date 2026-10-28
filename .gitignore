@@ -22,3 +22,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# sekrety lokalne - nigdy do gita
+.env
+.env.*
+!.env.example
