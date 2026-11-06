@@ -80,7 +80,7 @@ const MatrixChat = () => {
     return () => abort.abort();
   }, [session, dropSession]);
 
-  const list = [...rooms.current.values()].sort((a, b) => Number(b.invited) - Number(a.invited) || (b.messages.at?.(-1)?.ts ?? 0) - (a.messages.at?.(-1)?.ts ?? 0));
+  const list = [...rooms.current.values()].sort((a, b) => Number(b.invited) - Number(a.invited) || (b.messages[b.messages.length - 1]?.ts ?? 0) - (a.messages[a.messages.length - 1]?.ts ?? 0));
   const active = rooms.current.get(activeId);
   const logLength = active?.messages.length ?? 0;
   useEffect(() => { const log = logRef.current; if (log) log.scrollTop = log.scrollHeight; }, [activeId, logLength]);
